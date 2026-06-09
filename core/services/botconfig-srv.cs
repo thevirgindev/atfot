@@ -13,7 +13,7 @@ public class BotConfig
         // Load .env file from current directory
         Env.Load();
 
-        DiscordToken = Environment.GetEnvironmentVariable("DISCORD_TOKEN") ?? string.Empty;
-        OwnerDiscordId = Environment.GetEnvironmentVariable("OWNER_DISCORD_ID") ?? string.Empty;
+        DiscordToken = Environment.GetEnvironmentVariable("discord_token") ?? string.Empty;
+        OwnerDiscordId = Environment.GetEnvironmentVariable("owner_id") ?? string.Empty;
     }
 }
