@@ -1,0 +1,9 @@
+bin/
+obj/
+pewbot.db
+logs/
+.env
+*.user
+*.suo
+.DS_Store
+Thumbs.db
