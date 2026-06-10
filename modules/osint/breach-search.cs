@@ -2,10 +2,10 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
-using pewbot.core.services;
-using pewbot.models;
+using atfot.core.services;
+using atfot.models;
 
-namespace pewbot.modules.osint;
+namespace atfot.modules.osint;
 
 [Group("breach", "data breach and credential leak search")]
 public class BreachCmd : InteractionModuleBase<SocketInteractionContext>
@@ -60,7 +60,7 @@ public class BreachCmd : InteractionModuleBase<SocketInteractionContext>
         };
         dto.DeepLinks = links;
 
-        var description = $"**Email:** {email}\n\n**Breach Check Links:**\n{string.Join("\n", links)}\n*Note: Some services require API keys for automated results. Use `/admin setkey` for LeakCheck, DeHashed, etc.*";
+        var description = $"**Email:** {email}\n\n**Breach Check Links:**\n{string.Join("\n", links)}\n*Note: Some services require API keys for automated results. Use `/setapikey` for LeakCheck, DeHashed, etc.*";
         var embed = _embed.CreateMonochromeEmbed("breach intelligence", description, "dark");
 
         if (export.ToLower() == "json")
@@ -71,5 +71,3 @@ public class BreachCmd : InteractionModuleBase<SocketInteractionContext>
             await FollowupAsync(embed: embed);
     }
 }
-
-
