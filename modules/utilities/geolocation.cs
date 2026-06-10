@@ -5,10 +5,10 @@ using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
 using Newtonsoft.Json.Linq;
-using pewbot.core.services;
-using pewbot.models;
+using atfot.core.services;
+using atfot.models;
 
-namespace pewbot.modules.utilities;
+namespace atfot.modules.utilities;
 
 [Group("geo", "geospatial research and mapping tools")]
 public class GeolocationCmd : InteractionModuleBase<SocketInteractionContext>
@@ -45,7 +45,7 @@ public class GeolocationCmd : InteractionModuleBase<SocketInteractionContext>
     {
         if (!await EnsureAuthorized())
         {
-            await RespondAsync("🔒 You need to redeem a master key first using `/admin redeem`.", ephemeral: true);
+            await RespondAsync("🔒 You need to redeem a master key first using `/redeem`.", ephemeral: true);
             return;
         }
         if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
@@ -74,11 +74,10 @@ public class GeolocationCmd : InteractionModuleBase<SocketInteractionContext>
         };
         dto.DeepLinks = links;
 
-        // Optional: try to geocode using Nominatim (OpenStreetMap) - free, no key
         try
         {
             var client = _httpFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("User-Agent", "PewBot/1.0");
+            client.DefaultRequestHeaders.Add("User-Agent", "ATFOT/1.0");
             var response = await client.GetAsync($"https://nominatim.openstreetmap.org/search?q={encoded}&format=json&limit=1");
             if (response.IsSuccessStatusCode)
             {
@@ -111,6 +110,3 @@ public class GeolocationCmd : InteractionModuleBase<SocketInteractionContext>
             await FollowupAsync(embed: embed);
     }
 }
-
-
-

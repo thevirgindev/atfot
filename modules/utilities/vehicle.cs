@@ -2,10 +2,10 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
-using pewbot.core.services;
-using pewbot.models;
+using atfot.core.services;
+using atfot.models;
 
-namespace pewbot.modules.utilities;
+namespace atfot.modules.utilities;
 
 [Group("vehicle", "vehicle history and license plate lookup")]
 public class VehicleCmd : InteractionModuleBase<SocketInteractionContext>

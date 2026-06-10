@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
-using pewbot.core.services;
-using pewbot.models;
+using atfot.core.services;
+using atfot.models;
 using MetadataExtractor;
 using System.Net.Http;
 using System.IO;
 
-namespace pewbot.modules.utilities;
+namespace atfot.modules.utilities;
 
 [Group("image", "reverse image search and metadata analysis")]
 public class ImageCmd : InteractionModuleBase<SocketInteractionContext>

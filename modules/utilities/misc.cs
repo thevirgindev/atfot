@@ -3,14 +3,14 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
-using pewbot.core.services;
-using pewbot.models;
+using atfot.core.services;
+using atfot.models;
 using System.Text;
 using System.Security.Cryptography;
 using System.IO;
 using System.Linq;
 
-namespace pewbot.modules.utilities;
+namespace atfot.modules.utilities;
 
 [Group("misc", "miscellaneous OSINT utilities")]
 public class MiscCmd : InteractionModuleBase<SocketInteractionContext>

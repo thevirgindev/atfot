@@ -2,10 +2,10 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
-using pewbot.core.services;
-using pewbot.models;
+using atfot.core.services;
+using atfot.models;
 
-namespace pewbot.modules.network;
+namespace atfot.modules.network;
 
 [Group("threatactor", "threat actor profiling and APT groups")]
 public class ThreatActorCommands : InteractionModuleBase<SocketInteractionContext>

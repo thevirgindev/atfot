@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
-using pewbot.core.services;
-using pewbot.models;
+using atfot.core.services;
+using atfot.models;
 
-namespace pewbot.modules.search;
+namespace atfot.modules.search;
 
 [Group("pastebin", "pastebin search and discovery")]
 public class PastebinCmd : InteractionModuleBase<SocketInteractionContext>

@@ -2,10 +2,10 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
-using pewbot.core.services;
-using pewbot.models;
+using atfot.core.services;
+using atfot.models;
 
-namespace pewbot.modules.utilities;
+namespace atfot.modules.utilities;
 
 [Group("keyword", "keyword discovery and trend analysis")]
 public class KeywordCmd : InteractionModuleBase<SocketInteractionContext>

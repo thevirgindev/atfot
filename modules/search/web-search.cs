@@ -6,10 +6,10 @@ using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
 using Newtonsoft.Json.Linq;
-using pewbot.core.services;
-using pewbot.models;
+using atfot.core.services;
+using atfot.models;
 
-namespace pewbot.modules.search;
+namespace atfot.modules.search;
 
 [Group("search", "advanced search aggregators and archival tools")]
 public class SearchCmd : InteractionModuleBase<SocketInteractionContext>
@@ -50,10 +50,9 @@ public class SearchCmd : InteractionModuleBase<SocketInteractionContext>
         [Summary("target", "domain, company, or entity keyword")] string target,
         [Summary("export", "export format (none, txt, json)")] string export = "none")
     {
-        // Authorization & cooldown
         if (!await EnsureAuthorized())
         {
-            await RespondAsync("🔒 You need to redeem a master key first using `/admin redeem`.", ephemeral: true);
+            await RespondAsync("🔒 You need to redeem a master key first using `/redeem`.", ephemeral: true);
             return;
         }
         if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
@@ -85,22 +84,17 @@ public class SearchCmd : InteractionModuleBase<SocketInteractionContext>
 
         dto.DeepLinks = links;
 
-        // Attempt Google Custom Search API if key is present
         var googleKey = await _apiKeyService.GetApiKeyAsync(Context.User.Id.ToString(), "google_custom_search");
         if (!string.IsNullOrEmpty(googleKey))
         {
-            // Google CSE requires also a CX (search engine ID). For simplicity, we prompt user to add both.
-            // We'll store CX as a separate key? Or assume it's appended. For brevity, we'll just note.
             dto.ExtractedData["google_cse"] = "API key present, but CX needed for full integration. Using link fallback.";
         }
 
-        // Build description with clickable links
         var linkLines = string.Join("\n", links);
         var description = $"**Target:** `{target}`\n\n**Search Links:**\n{linkLines}";
 
         var embed = _embed.CreateMonochromeEmbed("search aggregators", description, "dark");
 
-        // Export if requested
         if (export.ToLower() == "json")
         {
             await FollowupWithFileAsync(_export.BuildJsonStream(dto), "search.json", embed: embed);
@@ -115,6 +109,3 @@ public class SearchCmd : InteractionModuleBase<SocketInteractionContext>
         }
     }
 }
-
-
-
