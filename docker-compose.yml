@@ -1,15 +1,15 @@
 version: '3.8'
 
 services:
-  pewbot:
+  atfot:
     image: ghcr.io/YOUR_GITHUB_USERNAME/atfot:latest
     container_name: atfot
     restart: unless-stopped
     env_file:
       - .env
     volumes:
-      - pewbot-data:/app/atfot.db
+      - atfot-data:/app/atfot.db
       - ./resources:/app/resources 
 
 volumes:
-  pewbot-data:
+  atfot-data:

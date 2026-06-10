@@ -2,7 +2,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-COPY Pew.csproj .
+COPY atfot.csproj .
 RUN dotnet restore
 
 COPY . .
@@ -31,4 +31,8 @@ COPY --from=build /app/publish /app
 
 RUN mkdir -p /app/resources /app/logs
 
-ENTRYPOINT ["dotnet", "Pew.dll"]
+RUN pip3 install --no-cache-dir holehe
+RUN go install -v github.com/tomnomnom/waybackurls@latest
+RUN go install -v github.com/lc/gau/v2/cmd/gau@latest
+
+ENTRYPOINT ["dotnet", "atfot.dll"]
