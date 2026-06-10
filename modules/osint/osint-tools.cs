@@ -7,11 +7,11 @@ using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
 using Newtonsoft.Json.Linq;
-using pewbot.core.services;
-using pewbot.models;
-using pewbot.utils;
+using atfot.core.services;
+using atfot.models;
+using atfot.utils;
 
-namespace pewbot.modules.osint;
+namespace atfot.modules.osint;
 
 [Group("osint", "extended OSINT utilities")]
 public class OsintToolsCmd : InteractionModuleBase<SocketInteractionContext>
@@ -43,9 +43,12 @@ public class OsintToolsCmd : InteractionModuleBase<SocketInteractionContext>
             .WithDescription($"```\n{content}\n```")
             .WithColor(new Color(0x55, 0x55, 0x55))
             .WithCurrentTimestamp()
-            .WithFooter(f => f.Text = "pewbot osint || made by @thevirgindev")
+            .WithFooter(f => f.Text = "ATFOT || made by @thevirgindev")
             .Build();
+
         var channel = Context.Channel;
+        if (channel == null) return;  // Fix: guard against null channel
+
         var msg = await channel.GetMessageAsync(msgId) as IUserMessage;
         if (msg != null)
         {
@@ -71,8 +74,11 @@ public class OsintToolsCmd : InteractionModuleBase<SocketInteractionContext>
         };
         using var proc = new Process { StartInfo = psi };
         proc.Start();
-        var outputTask = proc.StandardOutput.ReadToEndAsync();
-        var errorTask = proc.StandardError.ReadToEndAsync();
+
+        // Fix: use null-forgiving operator because streams are guaranteed non-null after Start() with redirection enabled
+        var outputTask = proc.StandardOutput!.ReadToEndAsync();
+        var errorTask = proc.StandardError!.ReadToEndAsync();
+
         if (await Task.WhenAny(proc.WaitForExitAsync(), Task.Delay(timeoutSec * 1000)) != proc.WaitForExitAsync())
         {
             proc.Kill();
@@ -106,7 +112,12 @@ public class OsintToolsCmd : InteractionModuleBase<SocketInteractionContext>
             if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {resp.StatusCode}");
             var json = await resp.Content.ReadAsStringAsync();
             var breaches = JArray.Parse(json);
-            var list = string.Join("\n", breaches.Select(b => $"- {b["Name"]} ({b["BreachDate"]})"));
+            var list = string.Join("\n", breaches.Select(b => 
+            {
+                var name = b["Name"]?.Value<string>() ?? "Unknown";
+                var date = b["BreachDate"]?.Value<string>() ?? "Unknown";
+                return $"- {name} ({date})";
+            }));
             var summary = $"📧 {email} found in {breaches.Count} breaches:\n{list}";
             await ShowResult(loading.Id, "HaveIBeenPwned", summary, json);
         }
@@ -172,7 +183,7 @@ public class OsintToolsCmd : InteractionModuleBase<SocketInteractionContext>
             if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {resp.StatusCode}");
             var json = await resp.Content.ReadAsStringAsync();
             var data = JObject.Parse(json)["data"];
-            var emails = data["emails"] as JArray;
+            var emails = data?["emails"] as JArray;
             if (emails == null || emails.Count == 0)
             {
                 await ShowResult(loading.Id, "Hunter.io", $"No emails found for {domain}.", json);
