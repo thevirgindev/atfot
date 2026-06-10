@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
-using pewbot.core.storage;
+using atfot.core.storage;
 
-namespace pewbot.core.services;
+namespace atfot.core.services;
 
 public class KeyRedemptionService
 {

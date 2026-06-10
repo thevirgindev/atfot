@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using pewbot.core.storage;
+using atfot.core.storage;
 
-namespace pewbot.core.services;
+namespace atfot.core.services;
 
 public class ApiKeyService
 {
@@ -31,7 +31,6 @@ public class ApiKeyService
     public async Task<Dictionary<string, List<(int id, string maskedKey, bool isDefault)>>> GetAllUserKeysGroupedAsync(string discordId)
         => await _db.GetAllUserKeysGroupedAsync(discordId);
 
-    // Backward compatibility for old code that expects a single default key
     public async Task<string?> GetApiKeyAsync(string discordId, string service)
         => await GetDefaultApiKeyAsync(discordId, service);
 }

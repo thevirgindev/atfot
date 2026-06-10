@@ -1,6 +1,6 @@
 using System;
 
-namespace pewbot.utils;
+namespace atfot.utils;
 
 public static class UserAgentRotator
 {

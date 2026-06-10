@@ -1,9 +1,9 @@
 using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
-using pewbot.core.services;
+using atfot.core.services;
 
-namespace pewbot.modules.core;
+namespace atfot.modules.core;
 
 public class ReportCmd : InteractionModuleBase<SocketInteractionContext>
 {

@@ -6,7 +6,7 @@ using Discord.Interactions;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 
-namespace pewbot.handlers;
+namespace atfot.handlers;
 
 public class InteractionHandler
 {
@@ -27,8 +27,7 @@ public class InteractionHandler
         
         _client.Ready += async () =>
         {
-            // Register commands globally (Discord will handle duplicates by overwriting)
-            await _interactions.RegisterCommandsGloballyAsync(true); // true = delete missing commands
+            await _interactions.RegisterCommandsGloballyAsync(true);
             Log.Information("Slash commands registered globally.");
         };
         

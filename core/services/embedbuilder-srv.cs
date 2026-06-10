@@ -1,6 +1,6 @@
 using Discord;
 
-namespace pewbot.core.services;
+namespace atfot.core.services;
 
 public class EmbedBuilderService
 {
@@ -22,7 +22,7 @@ public class EmbedBuilderService
             .WithDescription(description)
             .WithColor(color)
             .WithCurrentTimestamp()
-            .WithFooter(f => f.Text = "pewbot osint || made by thevirgindev")
+            .WithFooter(f => f.Text = "ATFOT || made by thevirgindev")
             .Build();
     }
 
@@ -39,6 +39,6 @@ public class EmbedBuilderService
             .WithTitle($"</{title}> ")
             .WithColor(color)
             .WithCurrentTimestamp()
-            .WithFooter(f => f.Text = "ATFOT (All The Fucking OSINT Tools) || made by thevirgindev");
+            .WithFooter(f => f.Text = "ATFOT || made by thevirgindev");
     }
 }

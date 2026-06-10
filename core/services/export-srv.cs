@@ -3,11 +3,11 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using Newtonsoft.Json.Linq;
-using pewbot.models;
+using atfot.models;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace pewbot.core.services;
+namespace atfot.core.services;
 
 public class ExportService
 {
@@ -83,39 +83,37 @@ public class ExportService
         return new MemoryStream(Encoding.UTF8.GetBytes(sb.ToString()));
     }
 
-public MemoryStream BuildJsonStream(ScanResultDto dto, string? aiSummary = null)
-{
-    object? rawJsonObj = null;
-    
-    if (!string.IsNullOrEmpty(dto.RawApiResponse))
+    public MemoryStream BuildJsonStream(ScanResultDto dto, string? aiSummary = null)
     {
-        try
+        object? rawJsonObj = null;
+        
+        if (!string.IsNullOrEmpty(dto.RawApiResponse))
         {
-            // Parse the string into a JsonElement so System.Text.Json treats it as a real, nested object
-            rawJsonObj = JsonSerializer.Deserialize<JsonElement>(dto.RawApiResponse);
+            try
+            {
+                rawJsonObj = JsonSerializer.Deserialize<JsonElement>(dto.RawApiResponse);
+            }
+            catch
+            {
+                rawJsonObj = dto.RawApiResponse;
+            }
         }
-        catch
+
+        var exportObj = new
         {
-            // Fallback to the raw string if it somehow isn't valid JSON
-            rawJsonObj = dto.RawApiResponse;
-        }
+            dto.TargetLookup,
+            dto.ModuleSource,
+            dto.ScanTimestamp,
+            RawApiResponse = rawJsonObj,
+            dto.Summary,
+            aiSummary,
+            DeepLinks = dto.DeepLinks ?? new List<string>(),
+            ExtractedData = dto.ExtractedData ?? new Dictionary<string, string>()
+        };
+
+        var json = JsonSerializer.Serialize(exportObj, _jsonOptions);
+        return new MemoryStream(Encoding.UTF8.GetBytes(json));
     }
-
-    var exportObj = new
-    {
-        dto.TargetLookup,
-        dto.ModuleSource,
-        dto.ScanTimestamp,
-        RawApiResponse = rawJsonObj, // Passes the native object instead of an escaped string
-        dto.Summary,
-        aiSummary,
-        DeepLinks = dto.DeepLinks ?? new List<string>(),
-        ExtractedData = dto.ExtractedData ?? new Dictionary<string, string>()
-    };
-
-    var json = JsonSerializer.Serialize(exportObj, _jsonOptions);
-    return new MemoryStream(Encoding.UTF8.GetBytes(json));
-}
 
     public MemoryStream BuildCsvStream(ScanResultDto dto)
     {
@@ -144,7 +142,6 @@ public MemoryStream BuildJsonStream(ScanResultDto dto, string? aiSummary = null)
                         var value = prop.Value.ToString();
                         if (string.IsNullOrEmpty(value)) continue;
 
-                        // Normalize fields to human readable formats for the dictionary
                         string cleanKey = prop.Name switch
                         {
                             "full_name" => "Full Name",
@@ -157,7 +154,6 @@ public MemoryStream BuildJsonStream(ScanResultDto dto, string? aiSummary = null)
                             _ => prop.Name
                         };
 
-                        // Clean up messy raw API value types
                         if (prop.Name == "account_type")
                         {
                             cleanKey = "Account Type";

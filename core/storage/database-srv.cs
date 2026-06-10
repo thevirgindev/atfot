@@ -4,7 +4,7 @@ using System.IO;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 
-namespace pewbot.core.storage;
+namespace atfot.core.storage;
 
 public class DatabaseService
 {
@@ -12,7 +12,7 @@ public class DatabaseService
 
     public DatabaseService()
     {
-        var dbPath = Path.Combine(AppContext.BaseDirectory, "pewbot.db");
+        var dbPath = Path.Combine(AppContext.BaseDirectory, "atfot.db");
         _connectionString = $"Data Source={dbPath}";
         InitializeDatabase();
         MigrateToMultiKey();
@@ -78,7 +78,6 @@ public class DatabaseService
         dropCmd.ExecuteNonQuery();
     }
 
-    // ----- Authorisation -----
     public async Task<bool> RedeemKeyAsync(string key, string discordId)
     {
         await using var conn = new SqliteConnection(_connectionString);
@@ -161,7 +160,6 @@ public class DatabaseService
         return results;
     }
 
-    // ----- Multi‑key API keys -----
     public async Task<int> AddApiKeyAsync(string discordId, string service, string apiKey, bool isDefault = false)
     {
         await using var conn = new SqliteConnection(_connectionString);
@@ -233,11 +231,10 @@ public class DatabaseService
         return result?.ToString();
     }
 
-// Backward compatibility
-public async Task<string?> GetApiKeyAsync(string discordId, string service)
-{
-    return await GetDefaultApiKeyAsync(discordId, service);
-}
+    public async Task<string?> GetApiKeyAsync(string discordId, string service)
+    {
+        return await GetDefaultApiKeyAsync(discordId, service);
+    }
 
     public async Task<bool> SetDefaultKeyAsync(string discordId, string service, int keyId)
     {
@@ -280,7 +277,6 @@ public async Task<string?> GetApiKeyAsync(string discordId, string service)
         return result;
     }
 
-    // ----- Revoke user access (/rmk) -----
     public async Task<bool> RevokeUserAccessAsync(string discordId)
     {
         await using var conn = new SqliteConnection(_connectionString);

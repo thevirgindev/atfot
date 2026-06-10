@@ -2,10 +2,10 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
-using pewbot.core.services;
-using pewbot.models;
+using atfot.core.services;
+using atfot.models;
 
-namespace pewbot.modules.osint;
+namespace atfot.modules.osint;
 
 [Group("company", "business and corporate intelligence")]
 public class CompanyCmd : InteractionModuleBase<SocketInteractionContext>

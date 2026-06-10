@@ -3,7 +3,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 
-namespace pewbot.core.http;
+namespace atfot.core.http;
 
 public abstract class ApiClientBase
 {

@@ -7,7 +7,7 @@ using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.PixelFormats;
 
-namespace pewbot.core.services;
+namespace atfot.core.services;
 
 public class ImageService : IDisposable
 {
@@ -88,7 +88,6 @@ public class ImageService : IDisposable
         var stream = new MemoryStream();
         await image.SaveAsJpegAsync(stream);
         stream.Position = 0;
-        // image generation success
         return stream;
     }
 

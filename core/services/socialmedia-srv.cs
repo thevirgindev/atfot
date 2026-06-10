@@ -1,9 +1,9 @@
 using System;
 using System.Threading.Tasks;
-using pewbot.core.http;
+using atfot.core.http;
 using Newtonsoft.Json.Linq;
 
-namespace pewbot.core.services;
+namespace atfot.core.services;
 
 public class SocialMediaService
 {
@@ -19,7 +19,7 @@ public class SocialMediaService
     public async Task<JObject?> GetRedditUserAsync(string username)
     {
         var client = _httpFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("User-Agent", "PewBot/1.0");
+        client.DefaultRequestHeaders.Add("User-Agent", "ATFOT/1.0");
         try
         {
             var url = $"https://www.reddit.com/user/{username}/about.json";
@@ -34,7 +34,7 @@ public class SocialMediaService
     public async Task<JObject?> GetGitHubUserAsync(string username)
     {
         var client = _httpFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("User-Agent", "PewBot/1.0");
+        client.DefaultRequestHeaders.Add("User-Agent", "ATFOT/1.0");
         try
         {
             var url = $"https://api.github.com/users/{username}";
@@ -49,7 +49,7 @@ public class SocialMediaService
     public async Task<JObject?> GetDiscordUserAsync(string userId)
     {
         var client = _httpFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("User-Agent", "PewBot/1.0");
+        client.DefaultRequestHeaders.Add("User-Agent", "ATFOT/1.0");
         string[] apis = {
             $"https://discordlookup.com/api/user/{userId}",
             $"https://discord.com/api/v9/users/{userId}",

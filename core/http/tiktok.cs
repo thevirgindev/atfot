@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 
-namespace pewbot.core.http;
+namespace atfot.core.http;
 
 public class TiktokClient : ApiClientBase
 {

@@ -5,7 +5,7 @@ using AngleSharp;
 using AngleSharp.Dom;
 using HtmlAgilityPack;
 
-namespace pewbot.core.services;
+namespace atfot.core.services;
 
 public class ScraperService
 {

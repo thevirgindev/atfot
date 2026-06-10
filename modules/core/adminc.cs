@@ -3,11 +3,11 @@ using System.Threading.Tasks;
 using Discord;
 using Discord.WebSocket;
 using Discord.Interactions;
-using pewbot.core.services;
-using pewbot.core.storage;
-using pewbot.utils;
+using atfot.core.services;
+using atfot.core.storage;
+using atfot.utils;
 
-namespace pewbot.modules.core;
+namespace atfot.modules.core;
 
 [DefaultMemberPermissions(GuildPermission.Administrator)]
 public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
@@ -18,6 +18,16 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
     private readonly EmbedBuilderService _embed;
     private readonly DatabaseService _dbService;
     private readonly BotConfig _botConfig;
+
+    private static readonly List<string> _services = new()
+    {
+        "shodan", "virustotal", "hunter", "emailrep", "google_custom_search", "openai",
+        "truecaller", "securitytrails", "alienvault", "twitter", "tiktok",
+        "linkedin", "pinterest", "telegram", "socialapi", "serpapi", "apify",
+        "osintcat", "leakinsight", "intelfetch", "indicia", "crowsint", "oathnet",
+        "peopledatalabs", "ipgeolocation", "onionengine", "abuseipdb",
+        "censys", "greynoise", "urlscan"
+    };
 
     public AdminCmd(KeyRedemptionService keyService, ApiKeyService apiKeyService, CooldownService cooldown,
         EmbedBuilderService embed, DatabaseService dbService, BotConfig botConfig)
@@ -95,6 +105,12 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
+        if (!_services.Contains(service))
+        {
+            await RespondAsync($"❌ Unknown service. Available: {string.Join(", ", _services)}", ephemeral: true);
+            return;
+        }
+
         var id = await _apiKeyService.AddApiKeyAsync(Context.User.Id.ToString(), service, apiKey, isDefault);
         await RespondAsync($"✅ API key for **{service}** added (ID: {id}). {Sarcasm.Get()}", ephemeral: true);
     }
@@ -114,6 +130,12 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
         if (!await EnsureAuthorized())
         {
             await RespondAsync("Redeem a master key first.", ephemeral: true);
+            return;
+        }
+
+        if (!_services.Contains(service))
+        {
+            await RespondAsync($"❌ Unknown service.", ephemeral: true);
             return;
         }
 
@@ -139,6 +161,12 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
         if (!await EnsureAuthorized())
         {
             await RespondAsync("You must redeem a master key first.", ephemeral: true);
+            return;
+        }
+
+        if (!_services.Contains(service))
+        {
+            await RespondAsync($"❌ Unknown service.", ephemeral: true);
             return;
         }
 
@@ -196,7 +224,6 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
 
     [SlashCommand("status", "change bot presence (owner only)")]
     [RequireOwner]
-
     public async Task SetStatus(
         [Summary("status", "online, idle, dnd, invisible")] string status = "idle",
         [Summary("activity", "playing activity text")] string activity = "ATFOT – All The Fucking OSINT Tools | /help")

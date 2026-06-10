@@ -4,7 +4,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace pewbot.core.services;
+namespace atfot.core.services;
 
 public class TorProxyService : IDisposable
 {

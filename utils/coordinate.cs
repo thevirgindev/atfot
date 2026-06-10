@@ -1,7 +1,7 @@
 using System;
 using System.Text.RegularExpressions;
 
-namespace pewbot.utils;
+namespace atfot.utils;
 
 public static class CoordinateConverter
 {

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Threading.Tasks;
 
-namespace pewbot.core.services;
+namespace atfot.core.services;
 
 public class CooldownService
 {
