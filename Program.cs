@@ -1,16 +1,16 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Discord;
 using Discord.WebSocket;
 using Discord.Interactions;
 using Serilog;
-using pewbot.core.http;
-using pewbot.core.services;
-using pewbot.core.storage;
-using pewbot.handlers;
+using atfot.core.http;
+using atfot.core.services;
+using atfot.core.storage;
+using atfot.handlers;
 
-namespace pewbot;
+namespace atfot;
 
 class Program
 {
