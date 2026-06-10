@@ -110,12 +110,12 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
         var statusMessages = new (string text, int delay)[]
         {
             ("```diff\n Initializing modules...```", 800),
-            ("```diff\n+ Initializing modules... done```",200),
+            ("```diff\n+ Initializing modules... [DONE]```",200),
             ("```diff\n Checking on providers health...```", 1200),
-            ("```diff\n+ Checking on providers health... perfectly fine!\n```", 200),
+            ("```diff\n+ Checking on providers health... [PERFECT]!\n```", 200),
             ("```diff\n Processing request...```", 400),
-            ("```diff\n+ Processing request...done\n```", 200),
-            ("```diff\n+ => All done twin! Please wait a moment...\n```", 1000)
+            ("```diff\n+ Processing request... [DONE]\n```", 200),
+            ("```diff\nAll done twin, Please wait a moment...\n```", 1000)
         };
 
         foreach (var (text, delay) in statusMessages)
@@ -253,7 +253,7 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
             var apiKey = await _apiKeyService.GetApiKeyAsync(userId, keyServiceName);
             if (string.IsNullOrEmpty(apiKey))
             {
-                results.Add((toolId, toolName, "add an api key first twin", null));
+                results.Add((toolId, toolName, "```diff - add an api key first twin```", null));
                 continue;
             }
 
@@ -296,7 +296,7 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
             .WithButton("▶", $"insta_carousel:{cacheKey}:{index + 1}", ButtonStyle.Secondary, disabled: index == tools.Count - 1)
             .WithButton("TXT", $"insta_export:{cacheKey}:{index}:txt", ButtonStyle.Secondary)
             .WithButton("JSON", $"insta_export:{cacheKey}:{index}:json", ButtonStyle.Secondary)
-            // CSV button removed
+            .WithButton("Back to Menu", $"back_to_menu:{cacheKey}", ButtonStyle.Secondary)
             .Build();
 
         var channel = Context.Channel as ISocketMessageChannel;
@@ -331,7 +331,7 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
         var tool = tools[index];
         if (string.IsNullOrEmpty(tool.rawJson))
         {
-            await FollowupAsync("No raw data to export.", ephemeral: true);
+            await FollowupAsync("```diff - No raw data to export.```", ephemeral: true);
             return;
         }
 
@@ -359,7 +359,7 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
         var toolList = GetToolsForPlatform(platform);
         if (toolList == null || toolList.Count == 0)
         {
-            await FollowupAsync($"No tools available for {platform}.", ephemeral: true);
+            await FollowupAsync($"```diff - No tools available for {platform}.```", ephemeral: true);
             return;
         }
 
@@ -370,9 +370,11 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
 
         var statusMessages = new (string text, int delay)[]
         {
-            ("```diff\n+ Initializing modules...\n```", 600),
-            ("```diff\n+ Processing request...\n```", 800),
-            ("```diff\n+ All done! Please wait...\n```", 1000)
+            ("```diff\n Checking on providers health...```", 1000),
+            ("```diff\n+ Checking on providers health... [PERFECT]!\n```", 200),
+            ("```diff\n Processing request...```", 400),
+            ("```diff\n+ Processing request... [DONE]\n```", 200),
+            ("```diff\nAll done twin, Please wait a moment...\n```", 700)
         };
 
         foreach (var (text, delay) in statusMessages)
@@ -408,7 +410,7 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
 
         if (results.Count == 0)
         {
-            await FollowupAsync("No data could be fetched.", ephemeral: true);
+            await FollowupAsync("```diff - No data could be fetched.```", ephemeral: true);
             return;
         }
 
@@ -436,7 +438,7 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
             .WithButton("▶", $"platform_carousel:{cacheKey}:{index + 1}", ButtonStyle.Secondary, disabled: index == tools.Count - 1)
             .WithButton("TXT", $"platform_export:{cacheKey}:{index}:txt", ButtonStyle.Secondary)
             .WithButton("JSON", $"platform_export:{cacheKey}:{index}:json", ButtonStyle.Secondary)
-            // CSV button removed
+            .WithButton("Back to Menu", $"back_to_menu:{cacheKey}", ButtonStyle.Secondary)
             .Build();
 
         var channel = Context.Channel as ISocketMessageChannel;
@@ -521,8 +523,7 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ERROR] Back button: {ex.Message}");
-            await smc.RespondAsync("Failed to regenerate profile image. Please try again.", ephemeral: true);
+            await smc.RespondAsync("Failed to regenerate profile on the target. Please try again.", ephemeral: true);
         }
     }
 
