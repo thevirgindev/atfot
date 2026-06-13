@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -11,12 +12,14 @@ namespace atfot.core.services;
 public class AiChatService
 {
     private readonly IHttpClientFactory _http;
+    private readonly ApiKeyService _apiKeys;
     private readonly Dictionary<string, List<(string role, string content)>> _history = new();
     private const int maxMsgs = 20;
 
-    public AiChatService(IHttpClientFactory http)
+    public AiChatService(IHttpClientFactory http, ApiKeyService apiKeys)
     {
         _http = http;
+        _apiKeys = apiKeys;
     }
 
     public async Task<string?> chatAsync(string userId, string userMsg, string? systemPrompt = null)
@@ -38,11 +41,16 @@ public class AiChatService
         var payload = new { model = "openai", messages = allMsgs, max_tokens = 1000, temperature = 0.7 };
         var client = _http.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(120);
+
+        var apiKey = await _apiKeys.GetApiKeyAsync(userId, "pollinations");
+        if (!string.IsNullOrEmpty(apiKey))
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
         var content = new StringContent(JObject.FromObject(payload).ToString(), Encoding.UTF8, "application/json");
 
         try
         {
-            var resp = await client.PostAsync("https://text.pollinations.ai/openai/chat/completions", content);
+            var resp = await client.PostAsync("https://gen.pollinations.ai/openai/chat/completions", content);
             if (!resp.IsSuccessStatusCode) return null;
             var json = await resp.Content.ReadAsStringAsync();
             var obj = JObject.Parse(json);
