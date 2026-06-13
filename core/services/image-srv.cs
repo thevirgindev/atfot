@@ -11,88 +11,52 @@ namespace atfot.core.services;
 
 public class ImageService : IDisposable
 {
-    private readonly Image<Rgba32> _templateImage;
-    private readonly Font _targetFont;
+    private readonly Image<Rgba32> _tpl;
+    private readonly Font _font;
 
     public ImageService()
     {
         var baseDir = AppContext.BaseDirectory;
-        Console.WriteLine($"[ImageService] dir: {baseDir}, checked");
+        var tplPath = Path.Combine(baseDir, "resources", "profile-lookup.jpg");
+        if (!File.Exists(tplPath))
+            throw new FileNotFoundException($"template not found: {tplPath}");
+        _tpl = Image.Load<Rgba32>(tplPath);
 
-        var templatePath = Path.Combine(baseDir, "resources", "profile-lookup.jpg");
-        Console.WriteLine($"[ImageService] Template path: {templatePath}, were good to go!");
-        Console.WriteLine($"[ImageService] Template exists: {File.Exists(templatePath)}, were good to go!");
-
-        if (!File.Exists(templatePath))
-            throw new FileNotFoundException($"Template image not found at {templatePath}");
-
-        _templateImage = Image.Load<Rgba32>(templatePath);
-
-        Font? font = null;
         var fontPath = Path.Combine(baseDir, "resources", "JetBrainsMono-Bold.ttf");
-        Console.WriteLine($"[ImageService] Font path: {fontPath}, were good to go!");
-        Console.WriteLine($"[ImageService] Font exists: {File.Exists(fontPath)}, were good to go!");
-
+        Font? font = null;
         if (File.Exists(fontPath))
         {
             try
             {
-                var collection = new FontCollection();
-                var family = collection.Add(fontPath);
-                font = family.CreateFont(42, FontStyle.Bold);
-                Console.WriteLine("[ImageService] Jetbrains font loaded successfully.");
+                var col = new FontCollection();
+                var fam = col.Add(fontPath);
+                font = fam.CreateFont(42, FontStyle.Bold);
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine($"[ImageService] Failed to load jb font: {ex.Message}");
+                try { font = SystemFonts.CreateFont("Consolas", 42, FontStyle.Bold); }
+                catch { try { font = SystemFonts.CreateFont("Arial", 42, FontStyle.Bold); } catch { throw; } }
             }
         }
-
-        if (font is null)
-        {
-            try
-            {
-                font = SystemFonts.CreateFont("Consolas", 42, FontStyle.Bold);
-                Console.WriteLine("[ImageService] Using Consolas font.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ImageService] Failed to load Consolas: {ex.Message}");
-                try
-                {
-                    font = SystemFonts.CreateFont("Arial", 42, FontStyle.Bold);
-                    Console.WriteLine("[ImageService] Using Arial font.");
-                }
-                catch (Exception ex2)
-                {
-                    Console.WriteLine($"[ImageService] Failed to load Arial: {ex2.Message}");
-                    throw;
-                }
-            }
-        }
-
-        _targetFont = font!;
+        _font = font!;
     }
 
-    public async Task<Stream> profilelookupImgAsync(string username)
+    // generates profile lookup image with username overlay
+    public async Task<Stream> profileLookupImg(string username)
     {
-        Console.WriteLine($"[ImageService] profilelookup called for username: {username}");
-
-        using var image = _templateImage.Clone();
-        var position = new Point(390, 663);
-
-        image.Mutate(ctx => ctx
+        using var img = _tpl.Clone();
+        var pos = new Point(390, 663);
+        img.Mutate(ctx => ctx
             .SetGraphicsOptions(new GraphicsOptions { Antialias = false })
-            .DrawText(username, _targetFont, Color.White, position));
-
+            .DrawText(username, _font, Color.White, pos));
         var stream = new MemoryStream();
-        await image.SaveAsJpegAsync(stream);
+        await img.SaveAsJpegAsync(stream);
         stream.Position = 0;
         return stream;
     }
 
     public void Dispose()
     {
-        _templateImage?.Dispose();
+        _tpl?.Dispose();
     }
 }
