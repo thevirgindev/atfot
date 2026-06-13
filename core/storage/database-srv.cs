@@ -12,9 +12,8 @@ namespace atfot.core.storage
         public string Theme { get; set; } = "dark";
         public string Notifications { get; set; } = "public";
         public bool AiSummaryEnabled { get; set; } = false;
-        public string ChatSystemPrompt { get; set; } = "";
-        public string LoadingStyle { get; set; } = "verbose";
-        public bool AutoCollapse { get; set; } = false;
+        public bool AiChatEnabled { get; set; } = false;
+        public string SystemPrompt { get; set; } = "";
         public string UpdatedAt { get; set; } = "";
     }
 
@@ -155,13 +154,20 @@ namespace atfot.core.storage
             conn.Open();
             var check = conn.CreateCommand();
             check.CommandText = "PRAGMA table_info(user_settings)";
-            bool hasChatPrompt = false;
+            bool hasSystemPrompt = false;
+            bool hasAiChat = false;
             using (var r = check.ExecuteReader())
-            { while (r.Read()) if (r.GetString(1) == "chat_system_prompt") { hasChatPrompt = true; break; } }
-
-            if (!hasChatPrompt)
             {
-                // create new table with clean schema, copy data
+                while (r.Read())
+                {
+                    var col = r.GetString(1);
+                    if (col == "system_prompt") hasSystemPrompt = true;
+                    if (col == "ai_chat_enabled") hasAiChat = true;
+                }
+            }
+
+            if (!hasSystemPrompt || !hasAiChat)
+            {
                 var create = conn.CreateCommand();
                 create.CommandText = @"
                     CREATE TABLE IF NOT EXISTS user_settings_new (
@@ -169,17 +175,16 @@ namespace atfot.core.storage
                         theme TEXT DEFAULT 'dark',
                         notifications TEXT DEFAULT 'public',
                         ai_summary_enabled INTEGER DEFAULT 0,
-                        chat_system_prompt TEXT DEFAULT '',
-                        loading_style TEXT DEFAULT 'verbose',
-                        auto_collapse INTEGER DEFAULT 0,
+                        ai_chat_enabled INTEGER DEFAULT 0,
+                        system_prompt TEXT DEFAULT '',
                         updated_at TEXT DEFAULT (datetime('now'))
                     )";
                 create.ExecuteNonQuery();
 
                 var copy = conn.CreateCommand();
                 copy.CommandText = @"
-                    INSERT INTO user_settings_new (discord_id, theme, ai_summary_enabled, updated_at)
-                    SELECT discord_id, theme, ai_summary_enabled, updated_at FROM user_settings";
+                    INSERT INTO user_settings_new (discord_id, theme, notifications, ai_summary_enabled, updated_at)
+                    SELECT discord_id, theme, notifications, ai_summary_enabled, updated_at FROM user_settings";
                 try { copy.ExecuteNonQuery(); } catch { }
 
                 var dropOld = conn.CreateCommand();
@@ -283,7 +288,7 @@ namespace atfot.core.storage
             var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT discord_id, theme, notifications, ai_summary_enabled,
-                       chat_system_prompt, loading_style, auto_collapse, updated_at
+                       ai_chat_enabled, system_prompt, updated_at
                 FROM user_settings WHERE discord_id = $id
             ";
             cmd.Parameters.AddWithValue("$id", discord_id);
@@ -296,18 +301,17 @@ namespace atfot.core.storage
                     Theme = reader.GetString(1),
                     Notifications = reader.GetString(2),
                     AiSummaryEnabled = reader.GetInt32(3) == 1,
-                    ChatSystemPrompt = reader.IsDBNull(4) ? "" : reader.GetString(4),
-                    LoadingStyle = reader.IsDBNull(5) ? "verbose" : reader.GetString(5),
-                    AutoCollapse = reader.GetInt32(6) == 1,
-                    UpdatedAt = reader.GetString(7)
+                    AiChatEnabled = reader.GetInt32(4) == 1,
+                    SystemPrompt = reader.IsDBNull(5) ? "" : reader.GetString(5),
+                    UpdatedAt = reader.GetString(6)
                 };
             }
             else
             {
                 var insert = conn.CreateCommand();
                 insert.CommandText = @"
-                    INSERT INTO user_settings (discord_id, theme, notifications, ai_summary_enabled, chat_system_prompt, loading_style, auto_collapse, updated_at)
-                    VALUES ($id, 'dark', 'public', 0, '', 'verbose', 0, datetime('now'))
+                    INSERT INTO user_settings (discord_id, theme, notifications, ai_summary_enabled, ai_chat_enabled, system_prompt, updated_at)
+                    VALUES ($id, 'dark', 'public', 0, 0, '', datetime('now'))
                 ";
                 insert.Parameters.AddWithValue("$id", discord_id);
                 await insert.ExecuteNonQueryAsync();
@@ -324,13 +328,12 @@ namespace atfot.core.storage
                 "theme" => "theme",
                 "notifications" => "notifications",
                 "ai_summary" => "ai_summary_enabled",
-                "ai_chat_system_prompt" => "chat_system_prompt",
-                "loading_style" => "loading_style",
-                "auto_collapse" => "auto_collapse",
+                "ai_chat" => "ai_chat_enabled",
+                "system_prompt" => "system_prompt",
                 _ => throw new ArgumentException("invalid key")
             };
-            object dbVal = (key.ToLower() == "ai_summary" || key.ToLower() == "auto_collapse")
-                ? (value.ToLower() == "true" || value == "1" ? 1 : 0)
+            object dbVal = (key.ToLower() == "ai_summary" || key.ToLower() == "ai_chat")
+                ? (value.ToLower() == "true" || value == "1" || value.ToLower() == "on" ? 1 : 0)
                 : value;
             var cmd = conn.CreateCommand();
             cmd.CommandText = $@"
