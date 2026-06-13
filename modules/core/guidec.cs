@@ -10,302 +10,264 @@ namespace atfot.modules.core;
 
 public class GuideCmd : InteractionModuleBase<SocketInteractionContext>
 {
-    private readonly KeyRedemptionService _keyService;
-    private readonly CooldownService _cooldown;
-    private readonly EmbedBuilderService _embed;
+    private readonly KeyRedemptionService _keySvc;
+    private readonly CooldownService _cd;
+    private readonly EmbedBuilderService _emb;
 
     private static readonly string[] _pages = {
-        // PAGE 1 – INTRODUCTION
-        "**ATFOT – COMPLETE OSINT GUIDE**\n" +
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "This bot provides open‑source intelligence (OSINT) for social media,\n" +
-        "Discord users, network infrastructure, data breaches, and more.\n\n" +
-        "**Before you start**\n" +
-        "1. The bot owner must generate a master key: `/genkey`\n" +
-        "2. You redeem it: `/redeem <key>`\n" +
-        "3. Then all commands become available.\n\n" +
+        // page 1
+        "**ATFOT - ALL THE FUCKING OSINT TOOLS**\n" +
+        "------------------------------------------------------------\n\n" +
+        "A Discord bot for OSINT, social media, Discord lookups, and more.\n\n" +
+        "**Quick Start**\n" +
+        "1. Owner runs `/genkey`\n" +
+        "2. You redeem: `/redeem <key>`\n" +
+        "3. Type `/guide` to revisit\n\n" +
         "**Navigation**\n" +
-        "Use the ◀ and ▶ buttons below to flip through this guide.\n" +
-        "There are 11 pages in total.\n\n" +
-        "**Support**\n" +
-        "- Report bugs or request features: `/report` (see page 11)\n" +
-        "- Check logs: `logs/bot.log` in the bot's directory.\n" +
-        "- Credits: made by @thevirgindev.",
+        "Use the buttons below to navigate. 12 pages total.\n\n" +
+        "Made by @thevirgindev",
 
-        // PAGE 2 – KEYS MANAGEMENT
-        "**MANAGING KEYS**\n" +
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "**Master key (owner only)**\n" +
-        "```\n/genkey\n```\nGenerates a 16‑character code like `D62DEDE6DDA34F04`.\n" +
-        "Give it to users you trust. They run:\n```\n/redeem D62DEDE6DDA34F04\n```\n\n" +
-        "**API keys for external services**\n" +
-        "Many commands require their own API keys (Shodan, Hunter, etc.).\n" +
-        "Add a key:\n```\n/setapikey <service> <key> [--default]\n```\n" +
-        "Example:\n```\n/setapikey shodan abc123 --default\n```\n" +
-        "You can store **multiple keys** per service (e.g., two Shodan keys).\n" +
-        "View your keys:\n```\n/mykeys\n```\n" +
-        "Remove a key:\n```\n/removeapikey <service> <keyid>\n```\n" +
-        "Change default key:\n```\n/setdefaultkey <service> <keyid>\n```\n\n" +
-        "**Where to get API keys**\n" +
-        "- Shodan → shodan.io (free 10 queries/month)\n" +
-        "- Hunter.io → hunter.io (50 free/month)\n" +
-        "- VirusTotal → virustotal.com (500/day)\n" +
-        "- AbuseIPDB → abuseipdb.com (100k/month)\n" +
-        "- PeopleDataLabs → peopledatalabs.com (100 credits free)\n" +
-        "- ipgeolocation.io → 3000 calls/month free\n" +
-        "- OnionEngine → free tier\n" +
-        "- OathNet → oathnet.org (10 daily free lookups)\n" +
-        "- SocialApi, SerpApi, Apify, Twitter, RapidAPI – see their websites.",
+        // page 2
+        "**KEY MANAGEMENT**\n" +
+        "------------------------------------------------------------\n\n" +
+        "**Master Key**\n" +
+        "`/genkey` - generate key (owner only)\n" +
+        "`/redeem <key>` - activate with key\n\n" +
+        "**API Keys**\n" +
+        "`/setapikey <service> <key> default [quota]`\n" +
+        "`/addnewkey <service> <key> [quota]`\n" +
+        "`/changekey <service> <keyid>`\n" +
+        "`/mykeys` - view keys (paginated)\n" +
+        "`/removeapikey <service> <keyid>`\n" +
+        "`/setdefaultkey <service> <keyid>`\n\n" +
+        "**Services**\n" +
+        "socialapi, serpapi, apify, twitter, tiktok, linkedin, pinterest, oathnet, osintcat, leakinsight, intelfetch, indicia, crowsint, peopledatalabs, ipgeolocation, onionengine, numverify\n\n" +
+        "Some tools (SpiderFoot) run in Docker and don't need API keys.",
 
-        // PAGE 3 – SOCIAL MEDIA OSINT
-        "**SOCIAL MEDIA FOOTPRINTS**\n" +
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "Command:\n```\n/social username <handle>\n```\n\n" +
-        "**What happens**\n" +
-        "1. Loading animation with status messages.\n" +
-        "2. A dynamic image appears with the handle.\n" +
-        "3. A dropdown menu lets you choose a platform.\n" +
-        "4. The bot fetches data using one or more tools per platform.\n" +
-        "5. Results appear in a **carousel** (◀/▶ buttons).\n" +
-        "6. Export buttons (TXT/JSON) let you save raw data.\n\n" +
-        "**Supported platforms and required keys**\n" +
-        "- Instagram: SocialApi, SerpApi (both need keys)\n" +
-        "- Reddit: Apify (needs Apify token, stored as `apify`)\n" +
+        // page 3
+        "**SOCIAL MEDIA OSINT**\n" +
+        "------------------------------------------------------------\n\n" +
+        "`/social username <handle>`\n\n" +
+        "1. Loading animation\n" +
+        "2. Profile image + text overlay\n" +
+        "3. Single dropdown with all platforms\n" +
+        "4. Real data fetched per platform\n" +
+        "5. Carousel with arrow buttons\n" +
+        "6. Export (TXT/JSON)\n\n" +
+        "**Platforms**\n" +
+        "- Instagram: socialapi / serpapi\n" +
+        "- Reddit: apify\n" +
         "- GitHub: public API (no key)\n" +
-        "- Twitter: Twitter API v2 (needs Bearer token, service `twitter`)\n" +
-        "- TikTok, LinkedIn, Telegram, Pinterest: RapidAPI (service names `tiktok`, `linkedin`, `telegram`, `pinterest`)\n\n" +
-        "**Example workflow**\n" +
-        "```\n/social username cristiano\n```\nWait for the image → pick Instagram → choose SocialApi.\nThe embed will show followers, following, posts, etc.",
+        "- Twitter: twitter api v2 / apify\n" +
+        "- TikTok: rapidapi / apify\n" +
+        "- LinkedIn: rapidapi / apify\n" +
+        "- Pinterest: rapidapi / apify\n" +
+        "- Facebook: serpapi / apify\n\n" +
+        "`/social username cristiano` -> pick platform -> view data",
 
-        // PAGE 4 – DEEP DISCORD LOOKUP
-        "**DISCORD USER OSINT**\n" +
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "Command:\n```\n/discord lookup <userid>\n```\n\n" +
-        "**Tools used**\n" +
-        "- **Public API** (japi.rest + fallback) – no key, works for any user. Returns username, global name, badges, accent colour, avatar, banner, linked accounts (rare).\n" +
-        "- **Official Discord API** – requires mutual guild (bot must share a server with the user). Shows mutual guilds if `GuildMembers` intent is enabled.\n" +
-        "- **OathNet** – requires free API key (`oathnet` service). Provides username history and Roblox correlation.\n" +
-        "- Other tools (OsintCat, LeakInsight, etc.) are placeholders.\n\n" +
-        "**Example output (Public API)**\n" +
-        "```diff\n" +
-        "ID          : 792430467176857610\n" +
-        "Username    : ty.64\n" +
-        "Global Name : Justice\n" +
-        "Created At  : 2020-12-26 16:35:46\n" +
-        "Badges      : HypeSquad Bravery\n" +
-        "Avatar URL  : https://cdn.discordapp.com/avatars/...\n" +
-        "Banner      : None\n" +
-        "```\n" +
-        "**API‑BASED OSINT TOOLS**\n" +
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "**HaveIBeenPwned** (no key)\n" +
-        "`/osint hibp email@example.com` – shows breaches containing the email.\n\n" +
-        "**AbuseIPDB** (needs key `abuseipdb`)\n" +
-        "`/osint abuseip 8.8.8.8` – abuse score, total reports, country.\n\n" +
-        "**Hunter.io** (needs key `hunter`)\n" +
-        "`/osint hunter example.com` – email addresses found for domain.\n\n" +
-        "**PeopleDataLabs** (needs key `peopledatalabs`)\n" +
-        "`/osint pdl email@example.com` – name, location, job, company.\n\n" +
-        "**ipgeolocation.io** (needs key `ipgeolocation`)\n" +
-        "`/osint ipgeo 8.8.8.8` – city, country, ISP, coordinates.\n\n" +
-        "**ip-api.com** (no key)\n" +
-        "`/osint ipapi 8.8.8.8` – free geolocation.\n\n" +
-        "**OnionEngine** (needs key `onionengine`)\n" +
-        "`/osint onion keyword` – dark web search.\n\n" +
-        "**EmailRep** (needs key `emailrep`)\n" +
-        "`/osint emailrep email@example.com` – reputation, deliverability, first seen.\n\n" +
-        "**AlienVault OTX** (needs key `alienvault`)\n" +
-        "`/osint alienvault indicator` – threat intelligence pulses (IP, domain, hash).\n\n" +
-        "**Censys** (needs key `censys`)\n" +
-        "`/osint censys 8.8.8.8` – open ports, services, host information.\n\n" +
-        "**GreyNoise** (needs key `greynoise`)\n" +
-        "`/osint greynoise 8.8.8.8` – check if IP is scanning the internet.\n\n" +
-        "**URLScan.io** (no key for basic)\n" +
-        "`/osint urlscan https://example.com` – scan a URL, get verdict and report.\n\n" +
-        "**Holehe** (CLI, Docker‑preinstalled)\n" +
-        "`/osint holehe email@example.com` – check email usage on many sites.\n\n" +
-        "**Waybackurls** (CLI)\n" +
-        "`/osint waybackurls example.com` – fetch archived URLs from Wayback Machine.\n\n" +
-        "**Gau** (CLI)\n" +
-        "`/osint gau example.com` – get all URLs (GetAllUrls) from multiple sources.\n\n",
+        // page 4
+        "**DISCORD OSINT**\n" +
+        "------------------------------------------------------------\n\n" +
+        "`/discord lookup <userid>`\n\n" +
+        "Tools used:\n" +
+        "- Public API (japi.rest + fallback) - no key\n" +
+        "- OathNet (username history, Roblox) - key: oathnet\n" +
+        "- OsintCat, LeakInsight, IntelFetch, Indicia, CrowSint - keys required\n\n" +
+        "Returns: username, global name, badges, avatar, banner, linked accounts.\n" +
+        "Carousel navigation with TXT/JSON export.",
 
-        // PAGE 6 – COMMAND‑LINE TOOLS (Docker version)
-        "**COMMAND‑LINE OSINT TOOLS (DOCKER)**\n" +
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "If you run the bot using the official Docker image, all CLI tools are pre‑installed.\n" +
-        "You don't need to install anything. The bot will run them directly.\n\n" +
-        "**Available commands**\n" +
-        "- `/osint sherlock <username>` – Search across 400+ sites.\n" +
-        "- `/osint harvester <domain>` – Emails, subdomains, virtual hosts.\n" +
-        "- `/osint spiderfoot <target>` – Automated OSINT scanning.\n" +
-        "- `/osint recon <domain>` – Recon-ng web reconnaissance.\n" +
-        "- `/osint subfinder <domain>` – Passive subdomain enumeration.\n" +
-        "- `/osint amass <domain>` – Attack surface mapping.\n" +
-        "- `/osint torbot <onion_url>` – Crawl onion sites (requires Tor).\n" +
-        "- `/osint odcrawler <username>` – Username disclosure.\n" +
-        "- `/osint whocord <type> <target>` – All‑in‑one (username, email, or Discord ID).\n\n" +
-        "**Behaviour**\n" +
-        "- Each command shows a loading embed: \"Running tool on target... may take 30‑120 seconds\".\n" +
-        "- After completion, the embed is replaced with the output (truncated to 4000 characters).\n" +
-        "- If the tool times out, the bot shows an error.\n" +
-        "- Export buttons (TXT/JSON) allow saving the raw console output.\n\n" +
-        "**Running without Docker**\n" +
-        "If you run the bot natively (not in Docker), you must install each tool manually using `pip` or `go`. The official Docker image is the recommended way.",
+        // page 5
+        "**OSINT TOOLS**\n" +
+        "------------------------------------------------------------\n\n" +
+        "**CLI Tools (Docker)**\n" +
+        "`/osint sherlock <username>` - 400+ sites username search\n" +
+        "`/osint harvester <domain>` - emails / subdomains\n" +
+        "`/osint sf <target>` - SpiderFoot (Shodan, VT, AlienVault, Hunter, Censys, AbuseIPDB, etc.)\n" +
+        "`/osint recon <domain>` - Recon-ng reconnaissance\n" +
+        "`/osint subfinder <domain>` - passive subdomain enum\n" +
+        "`/osint amass <domain>` - attack surface mapping\n" +
+        "`/osint torbot <onion_url>` - crawl onion sites\n" +
+        "`/osint odcrawler <username>` - username disclosure\n" +
+        "`/osint whocord <type> <target>` - all-in-one OSINT\n" +
+        "`/osint sublist3r <domain>` - subdomain enum\n" +
+        "`/osint whatweb <target>` - website fingerprinting\n" +
+        "`/osint dnsrecon <domain>` - DNS enumeration\n\n" +
+        "**Threat Intelligence**\n" +
+        "`/threat cve <cve-id>` - CVE lookup (no key)\n" +
+        "`/threat c2 <ip>` - C2 feed check (no key)\n" +
+        "`/threat malware <hash>` - hash check (no key)\n\n" +
+        "**Kept Individual**\n" +
+        "`/osint pdl <email>` - PeopleDataLabs\n" +
+        "`/osint ipgeo <ip>` - IP geolocation\n" +
+        "`/osint ipapi <ip>` - free IP geo\n" +
+        "`/osint onion <keyword>` - dark web search",
 
-        // PAGE 7 – INFRASTRUCTURE & NETWORK
-        "**INFRASTRUCTURE & NETWORK**\n" +
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "Command:\n```\n/infra investigate <ip|domain|onion>\n```\n" +
-        "Provides links to Shodan, VirusTotal, Censys, DNSDumpster, SecurityTrails.\n" +
-        "For .onion addresses, also Ahmia and DarkSearch.io.\n" +
-        "If you have set API keys for Shodan, VirusTotal, or SecurityTrails,\n" +
-        "the bot will display live data (ISP, open ports, subdomains, etc.).\n\n" +
-        "**DNS investigation**\n" +
-        "```\n/infra dns <domain>\n```\n" +
-        "Shows DNS history and subdomain enumeration (requires SecurityTrails API key).\n\n" +
-        "**Threat actors**\n" +
-        "- `/threatactor lookup <name>` – links to Malpedia, MITRE ATT&CK, APT groups.\n" +
-        "- `/threatactor map` – live cyber threat maps (Kaspersky, Check Point, etc.).\n\n" +
-        "Most of these commands are link aggregators; they don't require API keys unless you want live data.",
+        // page 6
+        "**CLI TOOLS (DOCKER)**\n" +
+        "------------------------------------------------------------\n\n" +
+        "Bot must run in Docker for CLI tools. All pre-installed:\n" +
+        "- Sherlock (username search)\n" +
+        "- theHarvester (email/subdomain)\n" +
+        "- SpiderFoot (aggregated OSINT)\n" +
+        "- Recon-ng (web recon)\n" +
+        "- Subfinder (subdomain enum)\n" +
+        "- AMASS (attack surface)\n" +
+        "- TorBot (onion crawl)\n" +
+        "- OD Crawler (username disclosure)\n" +
+        "- WhoCord (all-in-one)\n" +
+        "- Sublist3r, WhatWeb, DNSRecon\n\n" +
+        "Each command: loading embed, 30-120s, truncated output, export buttons.\n" +
+        "Without Docker: install tools manually or use Docker image.",
 
-        // PAGE 8 – UTILITY COMMANDS
-        "**UTILITY COMMANDS**\n" +
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "**Geolocation**\n" +
-        "```\n/geo locate \"New York\"\n```\nReturns Google Maps, SunCalc, Wikimapia, what3words links.\n\n" +
-        "**Image analysis**\n" +
-        "```\n/image reverse <url>\n```\nTinEye, Google Lens, Yandex, PimEyes links.\n" +
-        "```\n/image metadata <url>\n```\nExtracts EXIF data (GPS, camera model, software).\n\n" +
-        "**Keyword trends**\n" +
-        "```\n/keyword trends <topic>\n```\nGoogle Trends, KeywordTool, Ubersuggest links.\n\n" +
-        "**Maritime**\n" +
-        "```\n/maritime vessel <name>\n```\nVesselFinder, MarineTraffic, FleetMon links.\n\n" +
-        "**Vehicle**\n" +
-        "```\n/vehicle plate <plate>\n```\nUS/Europe license plate lookup links.\n\n" +
-        "**News & fact check**\n" +
-        "```\n/news latest <topic>\n```\nGoogle News, Reuters, BBC, AP links.\n" +
-        "```\n/news factcheck <claim>\n```\nSnopes, FactCheck.org, PolitiFact links.\n\n" +
-        "**World Bank data**\n" +
-        "```\n/data worldbank <indicator> [country]\n```\nGDP, population, etc. (no key).\n\n" +
-        "**Web monitoring**\n" +
-        "```\n/monitor alert <url>\n```\nChangeDetection, Visualping, Google Alerts links.\n\n" +
-        "**Privacy tools**\n" +
-        "```\n/privacy tools\n```\nList of recommended privacy tools.\n\n" +
-        "**Miscellaneous**\n" +
-        "```\n/misc cyberchef <input> <operation>\n```\nEncoding/hashing (md5, base64, url encode, etc.).\n" +
-        "```\n/misc wigle <ssid>\n```\nWi‑Fi network mapping (wigle.net).",
+        // page 7
+        "**AI FEATURES**\n" +
+        "------------------------------------------------------------\n\n" +
+        "**AI Summary** (auto-analysis after commands)\n" +
+        "`/settings set ai_summary true` to enable\n" +
+        "After any OSINT command, bot sends AI analysis using Pollinations API (free, no key).\n\n" +
+        "**AI Chatbot**\n" +
+        "`/ai chat <message>` - chat with AI assistant (free, unlimited)\n" +
+        "`/ai chat-reset` - clear conversation history\n\n" +
+        "Configure system prompt:\n" +
+        "`/settings set ai_chat_system_prompt your custom prompt`\n\n" +
+        "Both AI features use Pollinations (free, no API key needed).",
 
-        // PAGE 9 – ADMIN & OWNER COMMANDS
-        "**ADMIN & OWNER COMMANDS**\n" +
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "**Owner‑only** (Discord ID set in `.env`)\n" +
-        "```\n/genkey\n```\nGenerate a new master key.\n" +
-        "```\n/redemptions\n```\nView all redeemed keys.\n" +
-        "```\n/status <online|idle|dnd|invisible> [activity]\n```\nChange bot presence.\n" +
-        "```\n/rmk <userid>\n```\nRevoke a user's access.\n\n" +
-        "**All authorised users**\n" +
-        "```\n/redeem <key>\n```\nActivate the bot with a master key.\n" +
-        "```\n/setapikey <service> <key> [--default]\n```\nAdd an API key.\n" +
-        "```\n/mykeys\n```\nList your keys (masked).\n" +
-        "```\n/removeapikey <service> <keyid>\n```\nDelete a key.\n" +
-        "```\n/setdefaultkey <service> <keyid>\n```\nChange default key for a service.\n\n" +
-        "All these commands are top‑level (no `/admin` prefix).",
+        // page 8
+        "**SETTINGS**\n" +
+        "------------------------------------------------------------\n\n" +
+        "`/settings show` - view current settings\n" +
+        "`/settings set <key> <value>` - update\n\n" +
+        "Keys:\n" +
+        "- `theme` - dark, gray, white\n" +
+        "- `notifications` - silent (ephemeral), public\n" +
+        "- `ai_summary` - on/off (AI analysis after commands)\n" +
+        "- `ai_chat_system_prompt` - custom prompt for AI chat\n" +
+        "- `loading_style` - minimal, verbose\n" +
+        "- `auto_collapse` - on/off\n\n" +
+        "Settings persist per user across restarts.",
 
-        // PAGE 10 – FAQ & TROUBLESHOOTING
+        // page 9
+        "**ADMIN COMMANDS**\n" +
+        "------------------------------------------------------------\n\n" +
+        "**Owner-only**\n" +
+        "`/genkey` - generate master key\n" +
+        "`/redemptions` - view all redeemed keys\n" +
+        "`/status <online|idle|dnd|invisible> [activity]` - bot presence\n" +
+        "`/rmk <userid>` - revoke user access\n" +
+        "`/db_backup` - backup database\n" +
+        "`/db_restore <attachment>` - restore from backup\n" +
+        "`/db_prune [days]` - delete old redemptions\n" +
+        "`/db_stats` - database statistics\n\n" +
+        "**All authorized users**\n" +
+        "`/redeem`, `/setapikey`, `/addnewkey`, `/changekey`, `/mykeys`, `/removeapikey`, `/setdefaultkey`\n",
+
+        // page 10
         "**FAQ / TROUBLESHOOTING**\n" +
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "**Q: \"No data returned from Discord API (mutual guild required)\"**\n" +
-        "A: Your bot does not share any server with the target user. Use the public API tool in `/discord lookup` instead.\n\n" +
+        "------------------------------------------------------------\n\n" +
+        "**Q: Slash commands not responding**\n" +
+        "A: Bot needs `applications.commands` scope.\n\n" +
         "**Q: CLI tool not found**\n" +
-        "A: If you're not using Docker, you must install the tool. If you are using Docker, ensure the image is up‑to‑date (see page 11).\n\n" +
-        "**Q: \"Invalid or already used master key\"**\n" +
-        "A: The key was already redeemed or doesn't exist. The owner must generate a new one with `/genkey`.\n\n" +
+        "A: Use Docker or install tools manually.\n\n" +
+        "**Q: Invalid master key**\n" +
+        "A: Key was used/doesn't exist. Owner must generate new with `/genkey`.\n\n" +
         "**Q: Rate limiting / cooldown**\n" +
-        "A: Most commands have a 5‑second cooldown per user. Wait before running again.\n\n" +
-        "**Q: Image generation fails (profile image not appearing)**\n" +
-        "A: Make sure `resources/profile-lookup.jpg` and `JetBrainsMono-Bold.ttf` exist in the bot's working directory.\n\n" +
-        "**Q: The bot is slow**\n" +
-        "A: CLI tools can take 30‑120 seconds. API calls depend on external services. Be patient.\n\n" +
-        "**Q: How do I report a bug or request a feature?**\n" +
-        "A: Use the `/report` command (see next page).\n\n" +
-        "**Q: Where are the logs?**\n" +
-        "A: `logs/bot.log` inside the bot's directory. In Docker, use `docker logs <container>`.",
+        "A: Most commands have a 5s cooldown.\n\n" +
+        "**Q: Image generation fails**\n" +
+        "A: Check `resources/profile-lookup.jpg` and `JetBrainsMono-Bold.ttf`.\n\n" +
+        "**Q: Bot is slow**\n" +
+        "A: CLI tools take 30-120s. API calls depend on external services.\n\n" +
+        "**Q: AI chatbot not responding**\n" +
+        "A: Pollinations API must be reachable. Check network.\n\n" +
+        "**Q: Settings not saving**\n" +
+        "A: Must be authorized. Try `/settings show`.",
 
-        // PAGE 11 – REPORT, CREDITS, UPDATES
-        "**REPORT, CREDITS & UPDATES**\n" +
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "**Reporting issues**\n" +
-        "Use the command:\n```\n/report <description>\n```\nThe report will be sent to the bot owner privately.\n" +
-        "You can also include a file (e.g., screenshot) by attaching it to the command message.\n\n" +
-        "**Credits**\n" +
-        "- Developed by @thevirgindev\n" +
-        "- Open‑source on GitHub (link in the owner's profile)\n" +
-        "- Built with Discord.Net, SixLabors.ImageSharp, and many public OSINT APIs.\n\n" +
-        "**Updating the bot (for Docker users)**\n" +
-        "If you run the bot via Docker, updates are automatic when the image is rebuilt.\n" +
-        "The owner pushes a new image to `ghcr.io/YOUR_USERNAME/atfot:latest`.\n" +
-        "To get the latest version, run:\n" +
-        "```\ndocker pull ghcr.io/YOUR_USERNAME/atfot:latest\ndocker stop atfot\ndocker rm atfot\ndocker run -d --name atfot --env-file .env ghcr.io/YOUR_USERNAME/atfot:latest\n```\n" +
-        "If you run the bot natively, pull the latest code from GitHub and rebuild with `dotnet build -c Release`.\n\n" +
-        "**Enjoy the bot!**\n" +
-        "Type `/guide` again to revisit any page. For emergencies, contact the owner directly."
+        // page 11
+        "**REPORTS & UPDATES**\n" +
+        "------------------------------------------------------------\n\n" +
+        "**Report bugs / request features**\n" +
+        "`/report <description> [attachment]`\n" +
+        "Sent to bot owner privately.\n\n" +
+        "**Build from source**\n" +
+        "```\n" +
+        "git clone https://github.com/thevirgindev/atfot.git\n" +
+        "cd atfot\n" +
+        "dotnet build -c Release\n" +
+        "dotnet run --no-build -c Release\n" +
+        "```\n\n" +
+        "**Update (Docker)**\n" +
+        "```bash\n" +
+        "docker pull ghcr.io/thevirgindev/atfot:latest && docker-compose up -d\n" +
+        "```\n\n" +
+        "**Dashboard**\n" +
+        "Available at `http://localhost:5173` (separate process).\n\n" +
+        "Made by @thevirgindev",
+
+        // page 12
+        "**ROADMAP**\n" +
+        "------------------------------------------------------------\n\n" +
+        "Coming next:\n" +
+        "- **Dashboard** - React + TypeScript + shadcn/ui (in progress)\n" +
+        "- **More OSINT modules** - additional API integrations\n" +
+        "- **Webhook support** - alerts for specific OSINT findings\n" +
+        "- **Scheduled scans** - set recurring OSINT checks\n" +
+        "- **Export to multiple formats** - CSV, HTML reports\n\n" +
+        "Use `/report` to suggest features.\n\n" +
+        "Built with Discord.Net, SixLabors.ImageSharp, Pollinations AI."
     };
 
-    public GuideCmd(KeyRedemptionService keyService, CooldownService cooldown, EmbedBuilderService embed)
+    public GuideCmd(KeyRedemptionService keySvc, CooldownService cd, EmbedBuilderService emb)
     {
-        _keyService = keyService;
-        _cooldown = cooldown;
-        _embed = embed;
+        _keySvc = keySvc;
+        _cd = cd;
+        _emb = emb;
     }
 
-    private async Task ShowGuidePage(int page, ulong messageId)
+    private async Task showPage(int page, ulong msgId)
     {
-        var embed = _embed.CreateMonochromeEmbed($"ATFOT Guide – page {page + 1}/{_pages.Length}", _pages[page], "dark");
-        var components = new ComponentBuilder()
+        var emb = _emb.CreateMonochromeEmbed($"ATFOT Guide - page {page + 1}/{_pages.Length}", _pages[page], "dark");
+        var comps = new ComponentBuilder()
             .WithButton("◀", $"guide_page:{page - 1}", ButtonStyle.Secondary, disabled: page == 0)
             .WithButton("▶", $"guide_page:{page + 1}", ButtonStyle.Secondary, disabled: page == _pages.Length - 1)
             .Build();
-
         var channel = Context.Channel as ISocketMessageChannel;
-        var msg = await channel.GetMessageAsync(messageId) as IUserMessage;
+        var msg = await channel.GetMessageAsync(msgId) as IUserMessage;
         if (msg != null)
-            await msg.ModifyAsync(m => { m.Embed = embed; m.Components = components; });
+            await msg.ModifyAsync(m => { m.Embed = emb; m.Components = comps; });
         else
-            await FollowupAsync(embed: embed, components: components);
+            await FollowupAsync(embed: emb, components: comps);
     }
 
-    [SlashCommand("guide", "display the comprehensive OSINT bot guide (no emojis, markdown)")]
+    [SlashCommand("guide", "display the ATFOT bot guide")]
     public async Task Guide()
     {
-        if (!await _keyService.IsAuthorizedAsync(Context.User.Id.ToString()))
+        if (!await _keySvc.IsAuthorizedAsync(Context.User.Id.ToString()))
         {
-            await RespondAsync("Redeem a master key first. Then maybe I'll talk to you.", ephemeral: true);
+            await RespondAsync("[ERR] redeem a master key first.", ephemeral: true);
             return;
         }
-        if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
+        if (_cd.IsOnCooldown(Context.User.Id.ToString(), out var rem))
         {
-            await RespondAsync($"⏳ Wait {remaining.TotalSeconds:F0}s. Don't be so impatient.", ephemeral: true);
+            await RespondAsync($"[WARN] wait {rem.TotalSeconds:F0}s.", ephemeral: true);
             return;
         }
-        _cooldown.SetUsed(Context.User.Id.ToString());
-
+        _cd.SetUsed(Context.User.Id.ToString());
         await DeferAsync();
-        var embed = _embed.CreateMonochromeEmbed("ATFOT Guide – page 1/11", _pages[0], "dark");
-        var components = new ComponentBuilder()
+        var emb = _emb.CreateMonochromeEmbed("ATFOT Guide - page 1/12", _pages[0], "dark");
+        var comps = new ComponentBuilder()
             .WithButton("◀", "guide_page:0", ButtonStyle.Secondary, disabled: true)
             .WithButton("▶", "guide_page:1", ButtonStyle.Secondary)
             .Build();
-        await FollowupAsync(embed: embed, components: components);
+        await FollowupAsync(embed: emb, components: comps);
     }
 
     [ComponentInteraction("guide_page:*", ignoreGroupNames: true)]
-    public async Task HandleGuidePage(string pageStr)
+    public async Task onPage(string pageStr)
     {
         await DeferAsync();
         if (!int.TryParse(pageStr, out int page)) return;
         if (page < 0 || page >= _pages.Length) return;
         var smc = Context.Interaction as SocketMessageComponent;
         if (smc == null) return;
-        await ShowGuidePage(page, smc.Message.Id);
+        await showPage(page, smc.Message.Id);
     }
 }
