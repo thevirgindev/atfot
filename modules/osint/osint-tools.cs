@@ -493,7 +493,7 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
         if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
         var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running theHarvester on {domain}..."));
-        var output = await RunCli("theHarvester", $"-d {domain} -b all", 90);
+        var output = await RunCli("theharvester", $"-d {domain} -b all", 90);
         if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
         await ShowResult(loading.Id, "harvester", "theHarvester", output, null);
     }
@@ -548,7 +548,7 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
         if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
         var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running OD Crawler on {username}..."));
-        var output = await RunCli("od-crawler", username, 60);
+        var output = await RunCli("maigret", username, 60);
         if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
         await ShowResult(loading.Id, "odcrawler", "OD Crawler", output, null);
     }
