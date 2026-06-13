@@ -90,10 +90,11 @@ class Program
             .AddSingleton<CooldownService>()
             .AddSingleton<ExportService>()
             .AddSingleton<EmbedBuilderService>()
-            .AddSingleton<TorProxyService>()
-            .AddSingleton<ScraperService>()
             .AddSingleton<SocialMediaService>()
             .AddSingleton<ImageService>()
+            .AddSingleton<SettingsService>()
+            .AddSingleton<AiSummaryService>()
+            .AddSingleton<AiChatService>()
             .AddHttpClient()
             .BuildServiceProvider();
     }
