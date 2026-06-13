@@ -69,12 +69,12 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
     {
         if (!await EnsureAuthorized())
         {
-            await RespondAsync("Redeem a master key first.", ephemeral: true);
+            await RespondAsync("[ERR] redeem a master key first.", ephemeral: true);
             return;
         }
         if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
         {
-            await RespondAsync($"Wait a few seconds...", ephemeral: true);
+            await RespondAsync($"[WAIT] wait {remaining.TotalSeconds:F0}s.", ephemeral: true);
             return;
         }
         _cooldown.SetUsed(Context.User.Id.ToString());
@@ -84,7 +84,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
         var sessionId = Guid.NewGuid().ToString("N");
         var loadingEmbed = new EmbedBuilder()
             .WithTitle("Discord Lookup")
-            .WithDescription("```diff\nInitializing modules...```")
+            .WithDescription("```[INFO] initializing modules...```")
             .WithColor(new Color(0x55, 0x55, 0x55))
             .WithCurrentTimestamp()
             .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
@@ -94,10 +94,13 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
 
         var statusMessages = new (string text, int delay)[]
         {
-            ("```diff\n+ Initializing modules...\n```", 600),
-            ("```diff\n+ Checking Discord API...\n```", 800),
-            ("```diff\n+ Enumerating OSINT sources...\n```", 800),
-            ("```diff\n+ All done! Rendering profile...\n```", 1000)
+            ("```[INFO] initializing modules...```", 600),
+            ("```[DONE] initialized```", 200),
+            ("```[INFO] checking providers health...```", 800),
+            ("```[DONE] providers healthy```", 200),
+            ("```[INFO] enumerating OSINT sources...```", 800),
+            ("```[DONE] source check complete```", 200),
+            ("```[DONE] profile loaded```", 1000)
         };
 
         foreach (var (text, delay) in statusMessages)
@@ -135,7 +138,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
 
             if (keyService != null && string.IsNullOrEmpty(apiKey))
             {
-                results.Add((toolId, toolName, "API key required – use /setapikey", null));
+                results.Add((toolId, toolName, "[ERR] API key required – use /setapikey", null));
                 continue;
             }
 
@@ -145,9 +148,9 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
                 
                 // AI summary replacement (if enabled and rawJson exists)
                 string finalSummary = summary;
-                if (!string.IsNullOrEmpty(rawJson) && await _aiSummary.generateAsync(rawJson, $"Discord user {userId}") != null)
+                if (!string.IsNullOrEmpty(rawJson) && await _aiSummary.generateAsync(Context.User.Id.ToString(), rawJson, $"Discord user {userId}") != null)
                 {
-                    var aiSummaryText = await _aiSummary.generateAsync(rawJson, $"Discord user {userId}");
+                    var aiSummaryText = await _aiSummary.generateAsync(Context.User.Id.ToString(), rawJson, $"Discord user {userId}");
                     if (!string.IsNullOrEmpty(aiSummaryText))
                         finalSummary = aiSummaryText;
                 }
@@ -156,7 +159,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
             }
             catch (Exception ex)
             {
-                results.Add((toolId, toolName, $"Error: {ex.Message}", null));
+                results.Add((toolId, toolName, $"[ERR] {ex.Message}", null));
             }
         }
 
@@ -211,14 +214,14 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
         if (!int.TryParse(indexStr, out int index)) return;
         if (!_toolResultsCache.TryGetValue(cacheKey, out var tools) || index < 0 || index >= tools.Count)
         {
-            await FollowupAsync("Export data not found.", ephemeral: true);
+            await FollowupAsync("[ERR] export data not found.", ephemeral: true);
             return;
         }
 
         var tool = tools[index];
         if (string.IsNullOrEmpty(tool.rawJson))
         {
-            await FollowupAsync("No raw data to export.", ephemeral: true);
+            await FollowupAsync("[ERR] no raw data to export.", ephemeral: true);
             return;
         }
 
@@ -295,8 +298,9 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
         var avatarHash = profile["avatar"]?.Value<string>();
         var avatarUrl = !string.IsNullOrEmpty(avatarHash) ? $"https://cdn.discordapp.com/avatars/{userId}/{avatarHash}.png" : "None";
         var banner = profile["banner"]?.Value<string>() ?? "None";
-        var accentColor = profile["accent_color"]?.Value<int>();
-        var accentColorStr = accentColor.HasValue ? $"#{accentColor.Value:X6}" : "None";
+        var accentColorToken = profile["accent_color"];
+        var accentColorStr = (accentColorToken != null && accentColorToken.Type != JTokenType.Null && accentColorToken.Type != JTokenType.None)
+            ? $"#{accentColorToken.Value<int>():X6}" : "None";
         var avatarDecoration = profile["avatar_decoration"]?.Value<string>() ?? "None";
         var badges = profile["badges"]?.Select(b => b.ToString()).ToList();
         var badgesStr = badges != null && badges.Any() ? string.Join(", ", badges) : "None";
