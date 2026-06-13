@@ -13,7 +13,7 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    python3 python3-pip git golang curl \
+    python3 python3-pip git golang-go curl \
     whatweb dnsrecon \
     && rm -rf /var/lib/apt/lists/*
 
@@ -33,20 +33,22 @@ RUN git clone https://github.com/lanmaster53/recon-ng.git /opt/recon-ng \
 RUN git clone https://github.com/s0md3v/Photon.git /opt/photon \
     && cd /opt/photon \
     && pip3 install --break-system-packages --no-cache-dir -r requirements.txt \
-    && ln -sf /opt/photon/photon.py /usr/local/bin/photon
+    && printf '#!/bin/sh\nexec python3 /opt/photon/photon.py "$@"\n' > /usr/local/bin/photon \
+    && chmod +x /usr/local/bin/photon
 
-# Install maigret (username OSINT, successor to Sherlock-like tools, GitHub clone)
+# Install maigret (username OSINT, GitHub clone)
 RUN git clone https://github.com/soxoj/maigret.git /opt/maigret \
     && cd /opt/maigret \
     && pip3 install --break-system-packages --no-cache-dir -r requirements.txt \
-    && ln -sf /opt/maigret/maigret.py /usr/local/bin/maigret
+    && printf '#!/bin/sh\nexec python3 /opt/maigret/maigret.py "$@"\n' > /usr/local/bin/maigret \
+    && chmod +x /usr/local/bin/maigret
 
 # Install theHarvester (email/subdomain OSINT, GitHub clone)
 RUN git clone https://github.com/laramies/theHarvester.git /opt/theharvester \
     && cd /opt/theharvester \
     && pip3 install --break-system-packages --no-cache-dir -r requirements.txt \
-    && python3 setup.py install \
-    && ln -sf /opt/theharvester/theHarvester.py /usr/local/bin/theHarvester
+    && printf '#!/bin/sh\nexec python3 /opt/theharvester/theHarvester.py "$@"\n' > /usr/local/bin/theHarvester \
+    && chmod +x /usr/local/bin/theHarvester
 
 # Install other Python CLI tools that ARE on PyPI
 RUN pip3 install --break-system-packages --no-cache-dir \
