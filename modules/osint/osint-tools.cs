@@ -493,7 +493,7 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
         if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
         var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running theHarvester on {domain}..."));
-        var output = await RunCli("theharvester", $"-d {domain} -b all", 90);
+        var output = await RunCli("theHarvester", $"-d {domain} -b all", 90);
         if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
         await ShowResult(loading.Id, "harvester", "theHarvester", output, null);
     }
@@ -547,10 +547,10 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
     {
         if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running OD Crawler on {username}..."));
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running maigret on {username}..."));
         var output = await RunCli("maigret", username, 60);
         if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
-        await ShowResult(loading.Id, "odcrawler", "OD Crawler", output, null);
+        await ShowResult(loading.Id, "odcrawler", "OD Crawler (via maigret)", output, null);
     }
 
     [SlashCommand("whocord", "comprehensive OSINT (CLI)")]
@@ -565,7 +565,7 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
             "discord" => $"-d {target}",
             _ => throw new ArgumentException("Invalid type. Use username, email, or discord.")
         };
-        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running WhoCord on {target}..."));
+        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running WhoCord on {target}...").Build());
         var output = await RunCli("whocord", arg, 60);
         if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
         await ShowResult(loading.Id, "whocord", "WhoCord", output, null);
@@ -574,9 +574,9 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
     [SlashCommand("sublist3r", "enumerate subdomains using OSINT (CLI)")]
     public async Task Sublist3r([Summary("domain")] string domain)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running Sublist3r on {domain}..."));
+        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running Sublist3r on {domain}...").Build());
         var output = await RunCli("sublist3r", $"-d {domain} -t 10", 120);
         if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
         await ShowResult(loading.Id, "sublist3r", "Sublist3r", output, null);
@@ -585,9 +585,9 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
     [SlashCommand("whatweb", "fingerprint websites (CLI)")]
     public async Task WhatWeb([Summary("target", "URL or IP")] string target)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running WhatWeb on {target}..."));
+        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running WhatWeb on {target}...").Build());
         var output = await RunCli("whatweb", target, 60);
         if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
         await ShowResult(loading.Id, "whatweb", "WhatWeb", output, null);
@@ -596,9 +596,9 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
     [SlashCommand("dnsrecon", "DNS enumeration (CLI)")]
     public async Task DnsRecon([Summary("domain")] string domain)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running DNSRecon on {domain}..."));
+        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running DNSRecon on {domain}...").Build());
         var output = await RunCli("dnsrecon", $"-d {domain} -t axfr,zonewalk,bing", 90);
         if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
         await ShowResult(loading.Id, "dnsrecon", "DNSRecon", output, null);
