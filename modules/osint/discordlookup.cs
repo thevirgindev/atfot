@@ -24,7 +24,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
     private readonly SocialMediaService _socialMedia;
     private readonly IHttpClientFactory _httpFactory;
     private readonly ImageService _imageService;
-    private readonly DiscordSocketClient _client;
+    private readonly AiSummaryService _aiSummary;
 
     private static readonly Dictionary<string, List<(string toolId, string toolName, string result, string? rawJson)>> _toolResultsCache = new();
 
@@ -48,7 +48,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
         SocialMediaService socialMedia,
         IHttpClientFactory httpFactory,
         ImageService imageService,
-        DiscordSocketClient client)
+        AiSummaryService aiSummary)
     {
         _keyService = keyService;
         _apiKeyService = apiKeyService;
@@ -58,7 +58,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
         _socialMedia = socialMedia;
         _httpFactory = httpFactory;
         _imageService = imageService;
-        _client = client;
+        _aiSummary = aiSummary;
     }
 
     private async Task<bool> EnsureAuthorized() => await _keyService.IsAuthorizedAsync(Context.User.Id.ToString());
@@ -87,7 +87,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
             .WithDescription("```diff\nInitializing modules...```")
             .WithColor(new Color(0x55, 0x55, 0x55))
             .WithCurrentTimestamp()
-            .WithFooter(f => f.Text = "ATFOT || made by @thevirgindev")
+            .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
             .Build();
 
         var initialResponse = await FollowupAsync(embed: loadingEmbed, components: null);
@@ -110,21 +110,20 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
                     .WithDescription(text)
                     .WithColor(new Color(0x55, 0x55, 0x55))
                     .WithCurrentTimestamp()
-                    .WithFooter(f => f.Text = "ATFOT || made by @thevirgindev")
+                    .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
                     .Build();
             });
         }
 
         var tools = new List<(string toolId, string toolName, Func<string, string, Task<(string, string?)>> fetch, string? keyService)>
         {
-            ("public_api", "Discord Public API (no key required)", FetchDiscordPublicApi, null),
-            ("official_discord", "Discord Official API (mutual guild needed)", FetchOfficialDiscord, null),
-            ("osintcat", "OsintCat Public Records", FetchOsintCat, "osintcat"),
-            ("leakinsight", "LeakInsight Breach Check", FetchLeakInsight, "leakinsight"),
-            ("intelfetch", "IntelFetch AI OSINT", FetchIntelFetch, "intelfetch"),
-            ("indicia", "Indicia Footprint", FetchIndicia, "indicia"),
-            ("crowsint", "CrowSint Correlation", FetchCrowSint, "crowsint"),
-            ("oathnet", "OathNet Roblox/Discord", FetchOathNet, "oathnet")
+            ("public_api", "Discord Public API (no key)", FetchDiscordPublicApi, null),
+            ("oathnet", "OathNet (Roblox & name history)", FetchOathNet, "oathnet"),
+            ("osintcat", "OsintCat (coming soon)", FetchOsintCat, "osintcat"),
+            ("leakinsight", "LeakInsight (coming soon)", FetchLeakInsight, "leakinsight"),
+            ("intelfetch", "IntelFetch (coming soon)", FetchIntelFetch, "intelfetch"),
+            ("indicia", "Indicia (coming soon)", FetchIndicia, "indicia"),
+            ("crowsint", "CrowSint (coming soon)", FetchCrowSint, "crowsint")
         };
 
         var results = new List<(string toolId, string toolName, string result, string? rawJson)>();
@@ -136,14 +135,24 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
 
             if (keyService != null && string.IsNullOrEmpty(apiKey))
             {
-                results.Add((toolId, toolName, "Coming soon (API key required)", null));
+                results.Add((toolId, toolName, "API key required – use /setapikey", null));
                 continue;
             }
 
             try
             {
                 var (summary, rawJson) = await fetch(userId, apiKey ?? "");
-                results.Add((toolId, toolName, summary ?? "No data returned.", rawJson));
+                
+                // AI summary replacement (if enabled and rawJson exists)
+                string finalSummary = summary;
+                if (!string.IsNullOrEmpty(rawJson) && await _aiSummary.generateAsync(rawJson, $"Discord user {userId}") != null)
+                {
+                    var aiSummaryText = await _aiSummary.generateAsync(rawJson, $"Discord user {userId}");
+                    if (!string.IsNullOrEmpty(aiSummaryText))
+                        finalSummary = aiSummaryText;
+                }
+                
+                results.Add((toolId, toolName, finalSummary ?? "No data returned.", rawJson));
             }
             catch (Exception ex)
             {
@@ -167,7 +176,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
             .WithDescription($"```\n{tool.result}\n```")
             .WithColor(new Color(0x55, 0x55, 0x55))
             .WithCurrentTimestamp()
-            .WithFooter(f => f.Text = "ATFOT || made by @thevirgindev")
+            .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
             .Build();
 
         var components = new ComponentBuilder()
@@ -233,10 +242,10 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
     }
 
     // ---------- Tool implementations ----------
-
     private async Task<(string summary, string? rawJson)> FetchDiscordPublicApi(string userId, string _)
     {
         var client = _httpFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(30);
         client.DefaultRequestHeaders.Add("User-Agent", "ATFOT/1.0");
         var combinedData = new JObject();
 
@@ -263,7 +272,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
         {
             userData = await TryFallbackApi();
             if (userData == null)
-                return ("Public API request failed (user may not exist).", null);
+                return ("Public API request failed (user may not exist or API timeout).", null);
         }
 
         combinedData["user"] = userData;
@@ -339,86 +348,34 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
         return (summary, prettyJson);
     }
 
-    private async Task<(string summary, string? rawJson)> FetchOfficialDiscord(string userId, string _)
-    {
-        var data = await _socialMedia.GetDiscordUserAsync(userId);
-        if (data == null) return ("No data returned from Discord API (mutual guild required).", null);
-
-        var prettyJson = JsonConvert.SerializeObject(data, Formatting.Indented);
-        prettyJson = DecodeUnicodeEscapes(prettyJson);
-
-        var globalName = data["global_name"]?.Value<string>() ?? "N/A";
-        var username = data["username"]?.Value<string>() ?? "N/A";
-        var avatarHash = data["avatar"]?.Value<string>();
-        var avatarUrl = !string.IsNullOrEmpty(avatarHash) ? $"https://cdn.discordapp.com/avatars/{userId}/{avatarHash}.png" : "None";
-        var banner = data["banner"]?.Value<string>() ?? "None";
-        var verified = data["verified"]?.Value<bool>() ?? false;
-        var createdAt = "Unknown";
-        if (ulong.TryParse(userId, out var snowflake))
-        {
-            var timestamp = (long)((snowflake >> 22) + 1420070400000);
-            createdAt = DateTimeOffset.FromUnixTimeMilliseconds(timestamp).ToString("yyyy-MM-dd HH:mm:ss");
-        }
-
-        var mutualGuilds = new List<string>();
-        if (ulong.TryParse(userId, out var uid))
-        {
-            foreach (var guild in _client.Guilds)
-            {
-                try
-                {
-                    var guildUser = guild.GetUser(uid);
-                    if (guildUser != null)
-                        mutualGuilds.Add(guild.Name);
-                }
-                catch { /* ignore errors */ }
-            }
-        }
-        var mutualGuildsStr = mutualGuilds.Any() ? string.Join(", ", mutualGuilds) : "None (bot not in any common server)";
-
-        var summary = $"=================================\n" +
-                      $" Discord Profile (Official API)\n" +
-                      $"=================================\n" +
-                      $"ID          : {userId}\n" +
-                      $"Username    : {username}\n" +
-                      $"Global Name : {globalName}\n" +
-                      $"Created At  : {createdAt}\n" +
-                      $"Verified    : {(verified ? "Yes" : "No")}\n" +
-                      $"Mutual Guilds: {mutualGuildsStr}\n" +
-                      $"Avatar URL  : {avatarUrl}\n" +
-                      $"Banner      : {banner}\n" +
-                      $"=================================";
-        return (summary, prettyJson);
-    }
-
     private async Task<(string summary, string? rawJson)> FetchOsintCat(string userId, string apiKey)
     {
-        await Task.Delay(10);
-        return ("Coming soon (OsintCat integration)", null);
+        await Task.CompletedTask;
+        return ("OsintCat integration coming soon – will pull public records", null);
     }
 
     private async Task<(string summary, string? rawJson)> FetchLeakInsight(string userId, string apiKey)
     {
-        await Task.Delay(10);
-        return ("Coming soon (LeakInsight integration)", null);
+        await Task.CompletedTask;
+        return ("LeakInsight breach check coming soon", null);
     }
 
     private async Task<(string summary, string? rawJson)> FetchIntelFetch(string userId, string apiKey)
     {
-        await Task.Delay(10);
-        return ("Coming soon (IntelFetch integration)", null);
+        await Task.CompletedTask;
+        return ("IntelFetch AI OSINT coming soon", null);
     }
 
     private async Task<(string summary, string? rawJson)> FetchIndicia(string userId, string apiKey)
     {
-        await Task.Delay(10);
-        return ("Coming soon (Indicia integration)", null);
+        await Task.CompletedTask;
+        return ("Indicia digital footprint coming soon", null);
     }
 
     private async Task<(string summary, string? rawJson)> FetchCrowSint(string userId, string apiKey)
     {
-        await Task.Delay(10);
-        return ("Coming soon (CrowSint integration)", null);
+        await Task.CompletedTask;
+        return ("CrowSint correlation coming soon", null);
     }
 
     private async Task<(string summary, string? rawJson)> FetchOathNet(string userId, string apiKey)
