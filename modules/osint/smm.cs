@@ -71,34 +71,31 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
             .AddOption("facebook", "facebook");
     }
 
-    // builds (embed, stream for image, menu) — stream is null if image failed
+    private const string profileDesc =
+        "Enter the username you want to\n" +
+        "investigate across social media\n" +
+        "platforms. Select a platform from\n" +
+        "the dropdown to gather public\n" +
+        "data, social footprints, and\n" +
+        "associated accounts across the\n" +
+        "selected service.";
+
     private async Task<(Embed emb, Stream? imgStream, SelectMenuBuilder menu)> buildProfile(string username, string sessionId)
     {
         var menu = buildMenu(sessionId);
         Stream? imgStream = null;
-        try { imgStream = await _img.profileLookupImg(username); } catch { }
-        var desc = $"```\ntarget: {username}\nstatus: ready\nplatforms: ig, reddit, gh, twitter, tiktok, linkedin, pinterest, fb\n```";
-        Embed emb;
+        try { imgStream = await _img.profileLookupImg(); } catch { }
+        EmbedBuilder eb = new EmbedBuilder()
+            .WithTitle("Profile Lookup")
+            .WithDescription(profileDesc)
+            .AddField("user", $"`{username}`", inline: true)
+            .AddField("platforms", "`ig, reddit, gh, twitter, tiktok, linkedin, pinterest, fb`", inline: true)
+            .WithColor(new Color(0x55, 0x55, 0x55))
+            .WithCurrentTimestamp()
+            .WithFooter(f => f.Text = EmbedBuilderService.FooterText);
         if (imgStream != null)
-        {
-            emb = new EmbedBuilder()
-                .WithImageUrl("attachment://profile-lookup.jpg")
-                .WithDescription(desc)
-                .WithColor(new Color(0x55, 0x55, 0x55))
-                .WithCurrentTimestamp()
-                .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
-                .Build();
-        }
-        else
-        {
-            emb = new EmbedBuilder()
-                .WithDescription(desc)
-                .WithColor(new Color(0x55, 0x55, 0x55))
-                .WithCurrentTimestamp()
-                .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
-                .Build();
-        }
-        return (emb, imgStream, menu);
+            eb.WithImageUrl("attachment://atfot.jpg");
+        return (eb.Build(), imgStream, menu);
     }
 
     // helper to apply profile embed to a message
@@ -108,7 +105,7 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
         var comp = new ComponentBuilder().WithSelectMenu(menu).Build();
         if (img != null)
         {
-            var att = new List<FileAttachment> { new FileAttachment(img, "profile-lookup.jpg") };
+            var att = new List<FileAttachment> { new FileAttachment(img, "atfot.jpg") };
             await msg.ModifyAsync(m => { m.Embed = emb; m.Attachments = att; m.Components = comp; });
         }
         else
@@ -153,7 +150,7 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
             ("```[DONE] providers healthy```", 200),
             ("```[INFO] processing request...```", 400),
             ("```[DONE] processing request```", 200),
-            ("```[DONE] ready, please wait a moment...```", 1000)
+            ("```[DONE] profile loaded```", 1000)
         };
 
         foreach (var (text, delay) in status)
@@ -176,7 +173,7 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
             var comp2 = new ComponentBuilder().WithSelectMenu(menu2).Build();
             if (img != null)
             {
-                var att2 = new List<FileAttachment> { new FileAttachment(img, "profile-lookup.jpg") };
+                var att2 = new List<FileAttachment> { new FileAttachment(img, "atfot.jpg") };
                 await resp.ModifyAsync(m => { m.Embed = emb; m.Attachments = att2; m.Components = comp2; });
             }
             else
@@ -189,7 +186,10 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
             await resp.ModifyAsync(m =>
             {
                 m.Embed = new EmbedBuilder()
-                    .WithDescription($"```\ntarget: {username}\nstatus: ready\nplatforms: ig, reddit, gh, twitter, tiktok, linkedin, pinterest, fb\n```")
+                    .WithTitle("Profile Lookup")
+                    .WithDescription(profileDesc)
+                    .AddField("user", $"`{username}`", inline: true)
+                    .AddField("platforms", "`ig, reddit, gh, twitter, tiktok, linkedin, pinterest, fb`", inline: true)
                     .WithColor(new Color(0x55, 0x55, 0x55))
                     .WithCurrentTimestamp()
                     .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
@@ -235,11 +235,11 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
 
             var sts = new (string text, int delay)[]
             {
-                ("```[INFO] checking providers health...```", 1000),
+                ("```[INFO] running social media search...```", 1000),
                 ("```[DONE] providers healthy```", 200),
                 ("```[INFO] processing request...```", 400),
                 ("```[DONE] processing request```", 200),
-                ("```[DONE] ready, please wait a moment...```", 700)
+                ("```[DONE] search complete```", 700)
             };
 
             foreach (var (text, delay) in sts)
@@ -379,7 +379,7 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
             var comp4 = new ComponentBuilder().WithSelectMenu(menu).Build();
             if (img != null)
             {
-                var att4 = new List<FileAttachment> { new FileAttachment(img, "profile-lookup.jpg") };
+                var att4 = new List<FileAttachment> { new FileAttachment(img, "atfot.jpg") };
                 await smc.UpdateAsync(msg => { msg.Embed = emb; msg.Components = comp4; msg.Attachments = att4; });
             }
             else
@@ -392,7 +392,10 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
             await smc.UpdateAsync(msg =>
             {
                 msg.Embed = new EmbedBuilder()
-                    .WithDescription($"```\ntarget: {username}\nstatus: ready\nplatforms: ig, reddit, gh, twitter, tiktok, linkedin, pinterest, fb\n```")
+                    .WithTitle("Profile Lookup")
+                    .WithDescription(profileDesc)
+                    .AddField("user", $"`{username}`", inline: true)
+                    .AddField("platforms", "`ig, reddit, gh, twitter, tiktok, linkedin, pinterest, fb`", inline: true)
                     .WithColor(new Color(0x55, 0x55, 0x55))
                     .WithCurrentTimestamp()
                     .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
