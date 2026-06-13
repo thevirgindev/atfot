@@ -2,14 +2,21 @@ version: '3.8'
 
 services:
   atfot:
-    image: ghcr.io/YOUR_GITHUB_USERNAME/atfot:latest
+    build: .
     container_name: atfot
     restart: unless-stopped
     env_file:
       - .env
     volumes:
-      - atfot-data:/app/atfot.db
-      - ./resources:/app/resources 
+      - atfot-data:/app/data
+      - ./logs:/app/logs
+      - ./resources:/app/resources
+    networks:
+      - atfot-net
 
 volumes:
   atfot-data:
+
+networks:
+  atfot-net:
+    driver: bridge
