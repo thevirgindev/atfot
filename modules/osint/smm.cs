@@ -16,23 +16,22 @@ namespace atfot.modules.osint;
 [Group("social", "social media footprint analysis")]
 public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
 {
-    private readonly KeyRedemptionService _keyService;
-    private readonly ApiKeyService _apiKeyService;
-    private readonly CooldownService _cooldown;
-    private readonly EmbedBuilderService _embed;
+    private readonly KeyRedemptionService _keySvc;
+    private readonly ApiKeyService _apiKeySvc;
+    private readonly CooldownService _cd;
+    private readonly EmbedBuilderService _emb;
     private readonly ExportService _export;
-    private readonly SocialMediaService _socialMedia;
-    private readonly IHttpClientFactory _httpFactory;
-    private readonly ImageService _imageService;
+    private readonly SocialMediaService _sm;
+    private readonly IHttpClientFactory _http;
+    private readonly ImageService _img;
 
-    private static readonly Dictionary<string, string> _sessionUsername = new();
-    private static readonly Dictionary<ulong, string> _userUsername = new();
-    private static readonly Dictionary<string, List<(string toolId, string toolName, string result, string? rawJson)>> _toolResultsCache = new();
+    private static readonly Dictionary<string, string> _sessionUser = new();
+    private static readonly Dictionary<ulong, string> _userTarget = new();
+    private static readonly Dictionary<string, List<(string id, string name, string result, string? raw)>> _cache = new();
 
-    private static string DecodeUnicodeEscapes(string input)
+    private static string decodeUnicode(string input)
     {
-        if (string.IsNullOrEmpty(input))
-            return input;
+        if (string.IsNullOrEmpty(input)) return input;
         return Regex.Replace(input, @"\\u([0-9A-Fa-f]{4})", m =>
         {
             char c = (char)Convert.ToInt32(m.Groups[1].Value, 16);
@@ -40,144 +39,169 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
         });
     }
 
-    public SocialCmd(
-        KeyRedemptionService keyService,
-        ApiKeyService apiKeyService,
-        CooldownService cooldown,
-        EmbedBuilderService embed,
-        ExportService export,
-        SocialMediaService socialMedia,
-        IHttpClientFactory httpFactory,
-        ImageService imageService)
+    public SocialCmd(KeyRedemptionService keySvc, ApiKeyService apiKeySvc, CooldownService cd,
+        EmbedBuilderService emb, ExportService export, SocialMediaService sm,
+        IHttpClientFactory http, ImageService img)
     {
-        _keyService = keyService;
-        _apiKeyService = apiKeyService;
-        _cooldown = cooldown;
-        _embed = embed;
+        _keySvc = keySvc;
+        _apiKeySvc = apiKeySvc;
+        _cd = cd;
+        _emb = emb;
         _export = export;
-        _socialMedia = socialMedia;
-        _httpFactory = httpFactory;
-        _imageService = imageService;
+        _sm = sm;
+        _http = http;
+        _img = img;
     }
 
-    private async Task<bool> EnsureAuthorized() => await _keyService.IsAuthorizedAsync(Context.User.Id.ToString());
+    private async Task<bool> isAuthed() => await _keySvc.IsAuthorizedAsync(Context.User.Id.ToString());
+
+    // builds the platform dropdown — all platforms in one menu
+    private static SelectMenuBuilder buildMenu(string sessionId)
+    {
+        return new SelectMenuBuilder()
+            .WithPlaceholder("select a platform...")
+            .WithCustomId($"sp:{sessionId}")
+            .AddOption("instagram", "instagram")
+            .AddOption("reddit", "reddit")
+            .AddOption("github", "github")
+            .AddOption("twitter", "twitter")
+            .AddOption("tiktok", "tiktok")
+            .AddOption("linkedin", "linkedin")
+            .AddOption("pinterest", "pinterest")
+            .AddOption("facebook", "facebook");
+    }
+
+    // builds (embed, stream for image, menu) — stream is null if image failed
+    private async Task<(Embed emb, Stream? imgStream, SelectMenuBuilder menu)> buildProfile(string username, string sessionId)
+    {
+        var menu = buildMenu(sessionId);
+        Stream? imgStream = null;
+        try { imgStream = await _img.profileLookupImg(username); } catch { }
+        var desc = $"```\ntarget: {username}\nstatus: ready\nplatforms: ig, reddit, gh, twitter, tiktok, linkedin, pinterest, fb\n```";
+        Embed emb;
+        if (imgStream != null)
+        {
+            emb = new EmbedBuilder()
+                .WithImageUrl("attachment://profile-lookup.jpg")
+                .WithDescription(desc)
+                .WithColor(new Color(0x55, 0x55, 0x55))
+                .WithCurrentTimestamp()
+                .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
+                .Build();
+        }
+        else
+        {
+            emb = new EmbedBuilder()
+                .WithDescription(desc)
+                .WithColor(new Color(0x55, 0x55, 0x55))
+                .WithCurrentTimestamp()
+                .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
+                .Build();
+        }
+        return (emb, imgStream, menu);
+    }
+
+    // helper to apply profile embed to a message
+    private async Task sendProfile(IUserMessage msg, string username, string sessionId)
+    {
+        var (emb, img, menu) = await buildProfile(username, sessionId);
+        var comp = new ComponentBuilder().WithSelectMenu(menu).Build();
+        if (img != null)
+        {
+            var att = new List<FileAttachment> { new FileAttachment(img, "profile-lookup.jpg") };
+            await msg.ModifyAsync(m => { m.Embed = emb; m.Attachments = att; m.Components = comp; });
+        }
+        else
+        {
+            await msg.ModifyAsync(m => { m.Embed = emb; m.Components = comp; });
+        }
+    }
 
     [SlashCommand("username", "search for a username across major social platforms")]
     public async Task SocialUsername([Summary("username", "target username (without @)")] string username)
     {
-        if (!await EnsureAuthorized())
+        if (!await isAuthed()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
+        if (_cd.IsOnCooldown(Context.User.Id.ToString(), out var rem))
         {
-            await RespondAsync("Redeem a master key first.", ephemeral: true);
+            await RespondAsync($"[WARN] wait {rem.TotalSeconds:f0}s.", ephemeral: true);
             return;
         }
-        if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
-        {
-            await RespondAsync($"Wait a few seconds...", ephemeral: true);
-            return;
-        }
-        _cooldown.SetUsed(Context.User.Id.ToString());
+        _cd.SetUsed(Context.User.Id.ToString());
 
         await DeferAsync();
+        _userTarget[Context.User.Id] = username;
+        var sid = Guid.NewGuid().ToString("N");
+        _sessionUser[sid] = username;
 
-        _userUsername[Context.User.Id] = username;
-        var sessionId = Guid.NewGuid().ToString("N");
-        _sessionUsername[sessionId] = username;
+        var menu = buildMenu(sid);
+        var comp = new ComponentBuilder().WithSelectMenu(menu).Build();
 
-        var menu = new SelectMenuBuilder()
-            .WithPlaceholder("Select a platform...")
-            .WithCustomId($"social_platform:{sessionId}")
-            .AddOption("Instagram", "instagram")
-            .AddOption("Reddit", "reddit")
-            .AddOption("GitHub", "github")
-            .AddOption("Twitter", "twitter")
-            .AddOption("TikTok", "tiktok")
-            .AddOption("LinkedIn", "linkedin")
-            .AddOption("Telegram", "telegram")
-            .AddOption("Pinterest", "pinterest");
-
-        var component = new ComponentBuilder().WithSelectMenu(menu).Build();
-
-        var loadingEmbed = new EmbedBuilder()
-            .WithTitle("Profile Lookup")
-            .WithDescription("```diff\nInitializing modules...```")
+        var loadEmb = new EmbedBuilder()
+            .WithDescription("```[INFO] initializing modules...```")
             .WithColor(new Color(0x55, 0x55, 0x55))
             .WithCurrentTimestamp()
-            .WithFooter(f => f.Text = "the most powerful osint bot || made by @thevirgindev")
+            .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
             .Build();
 
-        var initialResponse = await FollowupAsync(embed: loadingEmbed, components: null);
+        var resp = await FollowupAsync(embed: loadEmb, components: null);
 
-        var statusMessages = new (string text, int delay)[]
+        var status = new (string text, int delay)[]
         {
-            ("```diff\n Initializing modules...```", 800),
-            ("```diff\n+ Initializing modules... [DONE]```",200),
-            ("```diff\n Checking on providers health...```", 1200),
-            ("```diff\n+ Checking on providers health... [PERFECT]!\n```", 200),
-            ("```diff\n Processing request...```", 400),
-            ("```diff\n+ Processing request... [DONE]\n```", 200),
-            ("```diff\nAll done twin, Please wait a moment...\n```", 1000)
+            ("```[INFO] initializing modules...```", 800),
+            ("```[DONE] initialized```", 200),
+            ("```[INFO] checking providers health...```", 1200),
+            ("```[DONE] providers healthy```", 200),
+            ("```[INFO] processing request...```", 400),
+            ("```[DONE] processing request```", 200),
+            ("```[DONE] ready, please wait a moment...```", 1000)
         };
 
-        foreach (var (text, delay) in statusMessages)
+        foreach (var (text, delay) in status)
         {
             await Task.Delay(delay);
-            await initialResponse.ModifyAsync(msg =>
+            await resp.ModifyAsync(m =>
             {
-                msg.Embed = new EmbedBuilder()
-                    .WithTitle("Profile Lookup")
+                m.Embed = new EmbedBuilder()
                     .WithDescription(text)
                     .WithColor(new Color(0x55, 0x55, 0x55))
                     .WithCurrentTimestamp()
-                    .WithFooter(f => f.Text = "the most powerful osint bot || made by @thevirgindev")
+                    .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
                     .Build();
             });
         }
 
         try
         {
-            using var imageStream = await _imageService.profilelookupImgAsync(username);
-            await initialResponse.ModifyAsync(msg =>
+            var (emb, img, menu2) = await buildProfile(username, sid);
+            var comp2 = new ComponentBuilder().WithSelectMenu(menu2).Build();
+            if (img != null)
             {
-                msg.Embed = new EmbedBuilder()
-                    .WithTitle("")
-                    .WithImageUrl("attachment://profile-lookup.jpg")
+                var att2 = new List<FileAttachment> { new FileAttachment(img, "profile-lookup.jpg") };
+                await resp.ModifyAsync(m => { m.Embed = emb; m.Attachments = att2; m.Components = comp2; });
+            }
+            else
+            {
+                await resp.ModifyAsync(m => { m.Embed = emb; m.Components = comp2; });
+            }
+        }
+        catch
+        {
+            await resp.ModifyAsync(m =>
+            {
+                m.Embed = new EmbedBuilder()
+                    .WithDescription($"```\ntarget: {username}\nstatus: ready\nplatforms: ig, reddit, gh, twitter, tiktok, linkedin, pinterest, fb\n```")
                     .WithColor(new Color(0x55, 0x55, 0x55))
                     .WithCurrentTimestamp()
-                    .WithFooter(f => f.Text = "the most powerful osint bot || made by @thevirgindev")
+                    .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
                     .Build();
-                msg.Attachments = new List<FileAttachment> { new FileAttachment(imageStream, "profile-lookup.jpg") };
-                msg.Components = component;
-            });
-        }
-        catch (Exception)
-        {
-            var fallbackEmbed = new EmbedBuilder()
-                .WithTitle("Profile Lookup")
-                .WithDescription($"┌────────────────────────────────────┐\n" +
-                                 $"│ Enter the username you want to     │\n" +
-                                 $"│ investigate across social media    │\n" +
-                                 $"│ platforms. Select a platform from  │\n" +
-                                 $"│ the dropdown to gather public      │\n" +
-                                 $"│ data, social footprints, and       │\n" +
-                                 $"│ associated accounts across the     │\n" +
-                                 $"│ selected service.                  │\n" +
-                                 $"│                                    │\n" +
-                                 $"│ Target: {username}                 │\n" +
-                                 $"└────────────────────────────────────┘")
-                .WithColor(new Color(0x55, 0x55, 0x55))
-                .WithCurrentTimestamp()
-                .WithFooter(f => f.Text = "the most powerful osint bot || made by @thevirgindev")
-                .Build();
-            await initialResponse.ModifyAsync(msg =>
-            {
-                msg.Embed = fallbackEmbed;
-                msg.Components = component;
+                m.Components = comp;
             });
         }
     }
 
-    [ComponentInteraction("social_platform:*", ignoreGroupNames: true)]
-    public async Task HandlePlatformSelection(string sessionId)
+    // unified platform selection — all platforms go through here
+    [ComponentInteraction("sp:*", ignoreGroupNames: true)]
+    public async Task onPlatformSelect(string sessionId)
     {
         await DeferAsync();
         try
@@ -187,658 +211,520 @@ public class SocialCmd : InteractionModuleBase<SocketInteractionContext>
             var platform = smc.Data.Values.FirstOrDefault();
             if (string.IsNullOrEmpty(platform)) return;
 
-            var originalMsg = await (Context.Channel as ISocketMessageChannel).GetMessageAsync(smc.Message.Id) as IUserMessage;
-            if (originalMsg != null)
+            var origMsg = await (Context.Channel as ISocketMessageChannel).GetMessageAsync(smc.Message.Id) as IUserMessage;
+            if (origMsg != null)
+                await origMsg.ModifyAsync(m => { m.Components = new ComponentBuilder().Build(); m.Attachments = null; });
+
+            if (!_sessionUser.TryGetValue(sessionId, out var username))
             {
-                await originalMsg.ModifyAsync(m =>
-                {
-                    m.Components = new ComponentBuilder().Build();
-                    m.Attachments = null;
-                });
-            }
-
-            if (!_sessionUsername.TryGetValue(sessionId, out var username))
-            {
-                await FollowupAsync("Session expired.", ephemeral: true);
-                return;
-            }
-
-            if (platform == "instagram")
-            {
-                await HandleInstagramTools(sessionId, username, smc.Message.Id);
-            }
-            else
-            {
-                await HandleOtherPlatform(platform, sessionId, username, smc.Message.Id);
-            }
-        }
-        catch (Exception ex)
-        {
-            await FollowupAsync($"Error: {ex.Message}", ephemeral: true);
-        }
-    }
-
-    private async Task HandleInstagramTools(string sessionId, string username, ulong originalMessageId)
-    {
-        var userId = Context.User.Id.ToString();
-
-        var channel = Context.Channel as ISocketMessageChannel;
-        var originalMsg = await channel.GetMessageAsync(originalMessageId) as IUserMessage;
-        if (originalMsg != null)
-        {
-            var loadingEmbed = new EmbedBuilder()
-                .WithTitle("Instagram Scrapers")
-                .WithDescription("```\nFetching data... Please wait a few seconds.\n```")
-                .WithColor(new Color(0x55, 0x55, 0x55))
-                .WithCurrentTimestamp()
-                .WithFooter(f => f.Text = "ATFOT osint // made by thevirgindev")
-                .Build();
-            await originalMsg.ModifyAsync(m =>
-            {
-                m.Embed = loadingEmbed;
-                m.Attachments = null;
-            });
-        }
-
-        var tools = new List<(string toolId, string toolName, Func<string, string, Task<(string summary, string? rawJson)>> fetch, string apiKeyServiceName)>
-        {
-            ("socialapi", "instagram socialapi scraper:", FetchSocialApisInstagram, "socialapi"),
-            ("serpapi", "instagram serpapi scraper:", FetchSerpApiInstagram, "serpapi")
-        };
-
-        var results = new List<(string toolId, string toolName, string result, string? rawJson)>();
-
-        foreach (var (toolId, toolName, fetch, keyServiceName) in tools)
-        {
-            var apiKey = await _apiKeyService.GetApiKeyAsync(userId, keyServiceName);
-            if (string.IsNullOrEmpty(apiKey))
-            {
-                results.Add((toolId, toolName, "```diff - add an api key first twin```", null));
-                continue;
-            }
-
-            try
-            {
-                var (summary, rawJson) = await fetch(username, userId);
-                if (summary != null && summary.Length > 4000)
-                    summary = summary.Substring(0, 4000) + "...\n(truncated)";
-                results.Add((toolId, toolName, summary ?? "No data returned.", rawJson));
-            }
-            catch (Exception ex)
-            {
-                results.Add((toolId, toolName, $"Error: {ex.Message}", null));
-            }
-        }
-
-        var cacheKey = $"{sessionId}_{username}";
-        _toolResultsCache[cacheKey] = results;
-
-        await ShowInstagramTool(cacheKey, 0, originalMessageId);
-    }
-
-    private async Task ShowInstagramTool(string cacheKey, int index, ulong messageId)
-    {
-        if (!_toolResultsCache.TryGetValue(cacheKey, out var tools) || index < 0 || index >= tools.Count)
-            return;
-
-        var tool = tools[index];
-        string cleanTitle = tool.toolName.Replace("instagram ", "").Replace(" scraper:", "").Trim();
-        var embed = new EmbedBuilder()
-            .WithTitle($"Instagram: {cleanTitle}")
-            .WithDescription($"```\n{tool.result}\n```")
-            .WithColor(new Color(0x55, 0x55, 0x55))
-            .WithCurrentTimestamp()
-            .WithFooter(f => f.Text = "the most powerful osint bot || made by @thevirgindev")
-            .Build();
-
-        var components = new ComponentBuilder()
-            .WithButton("◀", $"insta_carousel:{cacheKey}:{index - 1}", ButtonStyle.Secondary, disabled: index == 0)
-            .WithButton("▶", $"insta_carousel:{cacheKey}:{index + 1}", ButtonStyle.Secondary, disabled: index == tools.Count - 1)
-            .WithButton("TXT", $"insta_export:{cacheKey}:{index}:txt", ButtonStyle.Secondary)
-            .WithButton("JSON", $"insta_export:{cacheKey}:{index}:json", ButtonStyle.Secondary)
-            .WithButton("Back to Menu", $"back_to_menu:{cacheKey}", ButtonStyle.Secondary)
-            .Build();
-
-        var channel = Context.Channel as ISocketMessageChannel;
-        var msg = await channel.GetMessageAsync(messageId) as IUserMessage;
-        if (msg != null)
-            await msg.ModifyAsync(m => { m.Embed = embed; m.Components = components; });
-        else
-            await FollowupAsync(embed: embed, components: components);
-    }
-
-    [ComponentInteraction("insta_carousel:*:*", ignoreGroupNames: true)]
-    public async Task HandleInstaCarousel(string cacheKey, string indexStr)
-    {
-        await DeferAsync();
-        if (!int.TryParse(indexStr, out int index)) return;
-        var smc = Context.Interaction as SocketMessageComponent;
-        if (smc == null) return;
-        await ShowInstagramTool(cacheKey, index, smc.Message.Id);
-    }
-
-    [ComponentInteraction("insta_export:*:*:*", ignoreGroupNames: true)]
-    public async Task HandleInstaExport(string cacheKey, string indexStr, string format)
-    {
-        await DeferAsync(ephemeral: true);
-        if (!int.TryParse(indexStr, out int index)) return;
-        if (!_toolResultsCache.TryGetValue(cacheKey, out var tools) || index < 0 || index >= tools.Count)
-        {
-            await FollowupAsync("Export data not found.", ephemeral: true);
-            return;
-        }
-
-        var tool = tools[index];
-        if (string.IsNullOrEmpty(tool.rawJson))
-        {
-            await FollowupAsync("```diff - No raw data to export.```", ephemeral: true);
-            return;
-        }
-
-        var username = cacheKey.Split('_')[1];
-        var dto = new ScanResultDto
-        {
-            TargetLookup = username,
-            ModuleSource = tool.toolId,
-            RawApiResponse = tool.rawJson,
-            Summary = tool.result
-        };
-
-        string filename = $"{tool.toolId}_{username}_{DateTime.Now:yyyyMMddHHmmss}";
-        using var stream = format switch
-        {
-            "json" => _export.BuildJsonStream(dto),
-            _ => _export.BuildTextStream(dto)
-        };
-        await FollowupWithFileAsync(stream, $"{filename}.{format}", $"Exported {tool.toolName} data.");
-    }
-
-    private async Task HandleOtherPlatform(string platform, string sessionId, string username, ulong originalMessageId)
-    {
-        var userId = Context.User.Id.ToString();
-        var toolList = GetToolsForPlatform(platform);
-        if (toolList == null || toolList.Count == 0)
-        {
-            await FollowupAsync($"```diff - No tools available for {platform}.```", ephemeral: true);
-            return;
-        }
-
-        var channel = Context.Channel as ISocketMessageChannel;
-        if (channel == null) return;
-        var originalMsg = await channel.GetMessageAsync(originalMessageId) as IUserMessage;
-        if (originalMsg == null) return;
-
-        var statusMessages = new (string text, int delay)[]
-        {
-            ("```diff\n Checking on providers health...```", 1000),
-            ("```diff\n+ Checking on providers health... [PERFECT]!\n```", 200),
-            ("```diff\n Processing request...```", 400),
-            ("```diff\n+ Processing request... [DONE]\n```", 200),
-            ("```diff\nAll done twin, Please wait a moment...\n```", 700)
-        };
-
-        foreach (var (text, delay) in statusMessages)
-        {
-            await Task.Delay(delay);
-            await originalMsg.ModifyAsync(m =>
-            {
-                m.Embed = new EmbedBuilder()
-                    .WithTitle($"{platform} Scraper")
-                    .WithDescription(text)
-                    .WithColor(new Color(0x55, 0x55, 0x55))
-                    .WithCurrentTimestamp()
-                    .WithFooter(f => f.Text = "ATFOT osint // made by thevirgindev")
-                    .Build();
-                m.Attachments = null;
-            });
-        }
-
-        var results = new List<(string toolId, string toolName, string result, string? rawJson)>();
-        foreach (var tool in toolList)
-        {
-            if (tool.Fetch == null) continue;
-            try
-            {
-                var (summary, rawJson) = await tool.Fetch(username, userId);
-                results.Add((tool.Id!, tool.Name!, summary ?? "No data returned.", rawJson));
-            }
-            catch (Exception ex)
-            {
-                results.Add((tool.Id!, tool.Name!, $"Error: {ex.Message}", null));
-            }
-        }
-
-        if (results.Count == 0)
-        {
-            await FollowupAsync("```diff - No data could be fetched.```", ephemeral: true);
-            return;
-        }
-
-        var cacheKey = $"{sessionId}_{platform}_{username}";
-        _toolResultsCache[cacheKey] = results;
-        await ShowPlatformTool(cacheKey, 0, originalMessageId);
-    }
-
-    private async Task ShowPlatformTool(string cacheKey, int index, ulong messageId)
-    {
-        if (!_toolResultsCache.TryGetValue(cacheKey, out var tools) || index < 0 || index >= tools.Count)
-            return;
-
-        var tool = tools[index];
-        var embed = new EmbedBuilder()
-            .WithTitle(tool.toolName)
-            .WithDescription($"```\n{tool.result}\n```")
-            .WithColor(new Color(0x55, 0x55, 0x55))
-            .WithCurrentTimestamp()
-            .WithFooter(f => f.Text = "the most powerful osint bot || made by @thevirgindev")
-            .Build();
-
-        var components = new ComponentBuilder()
-            .WithButton("◀", $"platform_carousel:{cacheKey}:{index - 1}", ButtonStyle.Secondary, disabled: index == 0)
-            .WithButton("▶", $"platform_carousel:{cacheKey}:{index + 1}", ButtonStyle.Secondary, disabled: index == tools.Count - 1)
-            .WithButton("TXT", $"platform_export:{cacheKey}:{index}:txt", ButtonStyle.Secondary)
-            .WithButton("JSON", $"platform_export:{cacheKey}:{index}:json", ButtonStyle.Secondary)
-            .WithButton("Back to Menu", $"back_to_menu:{cacheKey}", ButtonStyle.Secondary)
-            .Build();
-
-        var channel = Context.Channel as ISocketMessageChannel;
-        var msg = await channel.GetMessageAsync(messageId) as IUserMessage;
-        if (msg != null)
-            await msg.ModifyAsync(m => { m.Embed = embed; m.Components = components; });
-        else
-            await FollowupAsync(embed: embed, components: components);
-    }
-
-    [ComponentInteraction("platform_carousel:*:*", ignoreGroupNames: true)]
-    public async Task HandlePlatformCarousel(string cacheKey, string indexStr)
-    {
-        await DeferAsync();
-        if (!int.TryParse(indexStr, out int index)) return;
-        var smc = Context.Interaction as SocketMessageComponent;
-        if (smc == null) return;
-        await ShowPlatformTool(cacheKey, index, smc.Message.Id);
-    }
-
-    [ComponentInteraction("back_to_menu:*", ignoreGroupNames: true)]
-    public async Task HandleBackToMenu(string cacheKey)
-    {
-        var smc = Context.Interaction as SocketMessageComponent;
-        if (smc == null) return;
-
-        var parts = cacheKey.Split('_');
-        string sessionId, username;
-        if (parts.Length == 2)
-        {
-            sessionId = parts[0];
-            username = parts[1];
-        }
-        else if (parts.Length >= 3)
-        {
-            sessionId = parts[0];
-            username = parts[2];
-        }
-        else
-        {
-            await smc.RespondAsync("Invalid session data.", ephemeral: true);
-            return;
-        }
-
-        if (!_sessionUsername.ContainsKey(sessionId))
-        {
-            await smc.RespondAsync("Session expired. Please use /social username again.", ephemeral: true);
-            return;
-        }
-
-        var menu = new SelectMenuBuilder()
-            .WithPlaceholder("Select a platform...")
-            .WithCustomId($"social_platform:{sessionId}")
-            .AddOption("Instagram", "instagram")
-            .AddOption("Reddit", "reddit")
-            .AddOption("GitHub", "github")
-            .AddOption("Twitter", "twitter")
-            .AddOption("TikTok", "tiktok")
-            .AddOption("LinkedIn", "linkedin")
-            .AddOption("Telegram", "telegram")
-            .AddOption("Pinterest", "pinterest");
-
-        var component = new ComponentBuilder().WithSelectMenu(menu).Build();
-
-        try
-        {
-            using var imageStream = await _imageService.profilelookupImgAsync(username);
-            var embed = new EmbedBuilder()
-                .WithTitle("")
-                .WithImageUrl("attachment://profile-lookup.jpg")
-                .WithColor(new Color(0x55, 0x55, 0x55))
-                .WithCurrentTimestamp()
-                .WithFooter(f => f.Text = "the most powerful osint bot || made by @thevirgindev")
-                .Build();
-
-            await smc.UpdateAsync(msg =>
-            {
-                msg.Embed = embed;
-                msg.Components = component;
-                msg.Attachments = new List<FileAttachment> { new FileAttachment(imageStream, "profile-lookup.jpg") };
-            });
-        }
-        catch (Exception ex)
-        {
-            await smc.RespondAsync("Failed to regenerate profile on the target. Please try again.", ephemeral: true);
-        }
-    }
-
-    [ComponentInteraction("platform_export:*:*:*", ignoreGroupNames: true)]
-    public async Task HandlePlatformExport(string cacheKey, string indexStr, string format)
-    {
-        await DeferAsync(ephemeral: true);
-        if (!int.TryParse(indexStr, out int index)) return;
-        if (!_toolResultsCache.TryGetValue(cacheKey, out var tools) || index < 0 || index >= tools.Count)
-        {
-            await FollowupAsync("Export data not found.", ephemeral: true);
-            return;
-        }
-
-        var tool = tools[index];
-        if (string.IsNullOrEmpty(tool.rawJson))
-        {
-            await FollowupAsync("No raw data to export.", ephemeral: true);
-            return;
-        }
-
-        var parts = cacheKey.Split('_');
-        var username = parts[2];
-        var dto = new ScanResultDto
-        {
-            TargetLookup = username,
-            ModuleSource = tool.toolId,
-            RawApiResponse = tool.rawJson,
-            Summary = tool.result
-        };
-
-        string filename = $"{tool.toolId}_{username}_{DateTime.Now:yyyyMMddHHmmss}";
-        using var stream = format switch
-        {
-            "json" => _export.BuildJsonStream(dto),
-            _ => _export.BuildTextStream(dto)
-        };
-        await FollowupWithFileAsync(stream, $"{filename}.{format}", $"Exported {tool.toolName} data.");
-    }
-
-    private List<ToolInfo>? GetToolsForPlatform(string platform)
-    {
-        return platform switch
-        {
-            "reddit" => new() { new ToolInfo { Id = "reddit_apify", Name = "reddit apify scraper", Fetch = FetchRedditAuthor } },
-            "github" => new() { new ToolInfo { Id = "github_api", Name = "github public api", Fetch = FetchGitHubApi } },
-            "twitter" => new() { new ToolInfo { Id = "twitter_api", Name = "twitter api v2", Fetch = FetchTwitterApi } },
-            "tiktok" => new() { new ToolInfo { Id = "tiktok_api", Name = "tiktok api", Fetch = FetchTikTokApi } },
-            "linkedin" => new() { new ToolInfo { Id = "linkedin_api", Name = "linkedin api", Fetch = FetchLinkedInApi } },
-            "telegram" => new() { new ToolInfo { Id = "telegram_api", Name = "telegram bot api", Fetch = FetchTelegramApi } },
-            "pinterest" => new() { new ToolInfo { Id = "pinterest_api", Name = "pinterest api", Fetch = FetchPinterestApi } },
-            _ => null
-        };
-    }
-
-    [ComponentInteraction("export:*:*:*:*", ignoreGroupNames: true)]
-    public async Task HandleExport(string sessionId, string platform, string toolId, string format)
-    {
-        await DeferAsync(ephemeral: true);
-        try
-        {
-            var smc = Context.Interaction as SocketMessageComponent;
-            if (smc == null) return;
-            if (!_sessionUsername.TryGetValue(sessionId, out var username))
-            {
-                await FollowupAsync("Session expired.", ephemeral: true);
+                await FollowupAsync("[ERR] session expired, run /social username again.", ephemeral: true);
                 return;
             }
 
             var userId = Context.User.Id.ToString();
-            var toolList = GetToolsForPlatform(platform);
-            var tool = toolList?.FirstOrDefault(t => t.Id == toolId);
-            if (tool == null || tool.Fetch == null)
+            var tools = getTools(platform);
+            if (tools == null || tools.Count == 0)
             {
-                await FollowupAsync("Tool not found.", ephemeral: true);
+                await FollowupAsync($"[ERR] no tools for {platform}.", ephemeral: true);
                 return;
             }
 
-            var result = await tool.Fetch(username, userId);
-            var summary = result.Item1;
-            var rawJson = result.Item2;
-            var dto = new ScanResultDto
+            var channel = Context.Channel as ISocketMessageChannel;
+            var oMsg = await channel.GetMessageAsync(smc.Message.Id) as IUserMessage;
+            if (oMsg == null) return;
+
+            var sts = new (string text, int delay)[]
             {
-                TargetLookup = username,
-                ModuleSource = $"{platform}_{toolId}",
-                RawApiResponse = rawJson ?? "",
-                Summary = summary ?? "No data"
+                ("```[INFO] checking providers health...```", 1000),
+                ("```[DONE] providers healthy```", 200),
+                ("```[INFO] processing request...```", 400),
+                ("```[DONE] processing request```", 200),
+                ("```[DONE] ready, please wait a moment...```", 700)
             };
-            string filename = $"{platform}_{toolId}_{username}_{DateTime.Now:yyyyMMddHHmmss}";
-            using var stream = format switch
+
+            foreach (var (text, delay) in sts)
             {
-                "json" => _export.BuildJsonStream(dto),
-                _ => _export.BuildTextStream(dto)
-            };
-            await FollowupWithFileAsync(stream, $"{filename}.{format}", $"Exported {platform} data.");
+                await Task.Delay(delay);
+                await oMsg.ModifyAsync(m =>
+                {
+                    m.Embed = new EmbedBuilder()
+                        .WithTitle($"{platform} scraper")
+                        .WithDescription(text)
+                        .WithColor(new Color(0x55, 0x55, 0x55))
+                        .WithCurrentTimestamp()
+                        .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
+                        .Build();
+                    m.Attachments = null;
+                });
+            }
+
+            var results = new List<(string id, string name, string result, string? raw)>();
+            foreach (var tool in tools)
+            {
+                if (tool.Fetch == null) continue;
+                try
+                {
+                    var (summary, raw) = await tool.Fetch(username, userId);
+                    results.Add((tool.Id!, tool.Name!, summary ?? "[ERR] no data returned.", raw));
+                }
+                catch (Exception ex)
+                {
+                    results.Add((tool.Id!, tool.Name!, $"[ERR] {ex.Message}", null));
+                }
+            }
+
+            if (results.Count == 0)
+            {
+                await FollowupAsync("[ERR] no data could be fetched.", ephemeral: true);
+                return;
+            }
+
+            var ck = $"{sessionId}_{platform}_{username}";
+            _cache[ck] = results;
+            await showTool(ck, 0, oMsg.Id);
         }
         catch (Exception ex)
         {
-            await FollowupAsync($"Export error: {ex.Message}", ephemeral: true);
+            await FollowupAsync($"[ERR] {ex.Message}", ephemeral: true);
         }
     }
 
-    // ---------- Tool implementations ----------
-
-    private async Task<(string summary, string? rawJson)> FetchSocialApisInstagram(string username, string discordUserId)
+    private async Task showTool(string ck, int idx, ulong msgId)
     {
-        var token = await _apiKeyService.GetApiKeyAsync(discordUserId, "socialapi");
-        if (string.IsNullOrEmpty(token))
-            return ("add an api key first", null);
-        var data = await _socialMedia.GetSocialApisInstagramUserAsync(username, token);
-        if (data == null) return ("No data returned from SocialApis.io.", null);
-        if (data["error"] != null) return ($"SocialApis error: {data["error"]}", null);
+        if (!_cache.TryGetValue(ck, out var tools) || idx < 0 || idx >= tools.Count) return;
+        var t = tools[idx];
 
-        var prettyJson = JsonConvert.SerializeObject(data, Formatting.Indented);
-        
-        var fullN = data["data"]?["full_name"]?.Value<string>() ?? data["full_name"]?.Value<string>() ?? "N/A";
-        var accId = data["data"]?["id"]?.Value<string>() ?? data["id"]?.Value<string>() ?? "N/A";
-        var followers = data["data"]?["followers_count"]?.Value<int>() ?? data["followers_count"]?.Value<int>() ?? 0;
-        var following = data["data"]?["following_count"]?.Value<int>() ?? data["following_count"]?.Value<int>() ?? 0;
-        var posts = data["data"]?["media_count"]?.Value<int>() ?? data["media_count"]?.Value<int>() ?? 0;
-        var isPriv = data["data"]?["is_private"]?.Value<bool>() ?? data["is_private"]?.Value<bool>() ?? false;
-        var isVerif = data["data"]?["is_verified"]?.Value<bool>() ?? data["is_verified"]?.Value<bool>() ?? false;
-        var accT = data["data"]?["is_business_account"]?.Value<bool>() ?? data["is_business_account"]?.Value<bool>() ?? false;
-        var extUrl = data["data"]?["external_url"]?.Value<string>() ?? data["external_url"]?.Value<string>() ?? "";
-        if (string.IsNullOrEmpty(extUrl)) extUrl = "None";
-        
-        var summary = $"=================================\n" +
-                      $" Profile Summary ==> {username}\n" +
-                      $"=================================\n" +
-                      $"Full Name      : {fullN}\n" +
-                      $"Account ID     : {accId}\n" +
-                      $"Followers      : {followers}\n" +
-                      $"Following      : {following}\n" +
-                      $"Posts          : {posts}\n" +
-                      $"Private        : {(isPriv ? "Yes" : "No")}\n" +
-                      $"Verified       : {(isVerif ? "Yes" : "No")}\n" +
-                      $"Account Type   : {(accT ? "Business" : "Personal")}\n" +
-                      $"External URL   : {extUrl}\n" +
-                      $"=================================";
-        return (summary, prettyJson);
+        var emb = new EmbedBuilder()
+            .WithTitle(t.name)
+            .WithDescription($"```\n{t.result}\n```")
+            .WithColor(new Color(0x55, 0x55, 0x55))
+            .WithCurrentTimestamp()
+            .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
+            .Build();
+
+        var comps = new ComponentBuilder()
+            .WithButton("◀", $"sc:{ck}:{idx - 1}", ButtonStyle.Secondary, disabled: idx == 0)
+            .WithButton("▶", $"sc:{ck}:{idx + 1}", ButtonStyle.Secondary, disabled: idx == tools.Count - 1)
+            .WithButton("txt", $"se:{ck}:{idx}:txt", ButtonStyle.Secondary)
+            .WithButton("json", $"se:{ck}:{idx}:json", ButtonStyle.Secondary)
+            .WithButton("back", $"sb:{ck}", ButtonStyle.Secondary)
+            .Build();
+
+        var channel = Context.Channel as ISocketMessageChannel;
+        var msg = await channel.GetMessageAsync(msgId) as IUserMessage;
+        if (msg != null)
+            await msg.ModifyAsync(m => { m.Embed = emb; m.Components = comps; });
+        else
+            await FollowupAsync(embed: emb, components: comps);
     }
 
-    private async Task<(string summary, string? rawJson)> FetchSerpApiInstagram(string username, string discordUserId)
+    [ComponentInteraction("sc:*:*", ignoreGroupNames: true)]
+    public async Task onCarousel(string ck, string idxStr)
     {
-        var token = await _apiKeyService.GetApiKeyAsync(discordUserId, "serpapi");
-        if (string.IsNullOrEmpty(token))
-            return ("add an api key first", null);
-        var data = await _socialMedia.GetSerpApiInstagramUserAsync(username, token);
-        if (data == null) return ("No data returned from SerpApi.", null);
-        if (data["error"] != null) return ($"SerpApi error: {data["error"]}", null);
-
-        var prettyJson = JsonConvert.SerializeObject(data, Formatting.Indented);
-        
-        var fullName = data["full_name"]?.Value<string>() ?? "N/A";
-        var accountId = data["id"]?.Value<string>() ?? "N/A";
-        var followers = data["followers"]?.Value<int>() ?? 0;
-        var following = data["following"]?.Value<int>() ?? 0;
-        var posts = data["posts_count"]?.Value<int>() ?? 0;
-        var isPrivate = data["is_private"]?.Value<bool>() ?? false;
-        var isVerified = data["is_verified"]?.Value<bool>() ?? false;
-        var businessAccount = data["is_business_account"]?.Value<bool>() ?? false;
-        var externalUrl = data["external_url"]?.Value<string>() ?? "";
-        if (string.IsNullOrEmpty(externalUrl)) externalUrl = "None";
-        var created = data["created_at"]?.Value<string>() ?? "N/A";
-        var createdDate = DateTime.TryParse(created, out var dt) ? dt.ToString("yyyy-MM-dd") : created;
-        var createdDateRelative = DateTime.TryParse(created, out var dt2) ? $"{(DateTime.UtcNow - dt2).TotalDays:F0} days ago" : created;
-        var profilePic = data["profile_pic_url"]?.Value<string>() ?? "N/A";
-        
-        var summary = $"=================================\n" +
-                      $" Profile Summary ==> {username}\n" +
-                      $"=================================\n" +
-                      $"Full Name      : {fullName}\n" +
-                      $"Account ID     : {accountId}\n" +
-                      $"Followers      : {followers}\n" +
-                      $"Following      : {following}\n" +
-                      $"Posts          : {posts}\n" +
-                      $"Private        : {(isPrivate ? "Yes" : "No")}\n" +
-                      $"Verified       : {(isVerified ? "Yes" : "No")}\n" +
-                      $"Account Type   : {(businessAccount ? "Business" : "Personal")}\n" +
-                      $"External URL   : {externalUrl}\n" +
-                      $"Created At     : {createdDate}\n" +
-                      $"Created Rel.   : {createdDateRelative}\n" +
-                      $"Profile Pic    : {profilePic}\n" +
-                      $"=================================";
-        return (summary, prettyJson);
+        await DeferAsync();
+        if (!int.TryParse(idxStr, out int idx)) return;
+        var smc = Context.Interaction as SocketMessageComponent;
+        if (smc == null) return;
+        await showTool(ck, idx, smc.Message.Id);
     }
 
-    private async Task<(string summary, string? rawJson)> FetchTwitterApi(string username, string discordUserId)
+    [ComponentInteraction("se:*:*:*", ignoreGroupNames: true)]
+    public async Task onExport(string ck, string idxStr, string fmt)
     {
-        var key = await _apiKeyService.GetApiKeyAsync(discordUserId, "twitter");
-        if (string.IsNullOrEmpty(key)) return ("No Twitter API key set. Use /admin setkey twitter <token>", null);
-        var data = await _socialMedia.GetTwitterUserAsync(username, discordUserId);
-        if (data == null) return ("No data from Twitter API.", null);
-        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
-        json = DecodeUnicodeEscapes(json);
-        return (json, json);
+        await DeferAsync(ephemeral: true);
+        if (!int.TryParse(idxStr, out int idx)) return;
+        if (!_cache.TryGetValue(ck, out var tools) || idx < 0 || idx >= tools.Count)
+        {
+            await FollowupAsync("[ERR] export data not found.", ephemeral: true);
+            return;
+        }
+
+        var t = tools[idx];
+        if (string.IsNullOrEmpty(t.raw))
+        {
+            await FollowupAsync("[ERR] no raw data to export.", ephemeral: true);
+            return;
+        }
+
+        var parts = ck.Split('_');
+        var username = parts.Length >= 3 ? parts[2] : parts.Last();
+        var dto = new ScanResultDto { TargetLookup = username, ModuleSource = t.id, RawApiResponse = t.raw, Summary = t.result };
+        string fn = $"{t.id}_{username}_{DateTime.Now:yyyyMMddHHmmss}";
+        using var stream = fmt == "json" ? _export.BuildJsonStream(dto) : _export.BuildTextStream(dto);
+        await FollowupWithFileAsync(stream, $"{fn}.{fmt}", $"exported {t.name} data.");
     }
 
-    private async Task<(string summary, string? rawJson)> FetchTikTokApi(string username, string discordUserId)
+    // back to menu — regenerates image + text + platform dropdown
+    [ComponentInteraction("sb:*", ignoreGroupNames: true)]
+    public async Task onBackToMenu(string ck)
     {
-        var key = await _apiKeyService.GetApiKeyAsync(discordUserId, "tiktok");
-        if (string.IsNullOrEmpty(key)) return ("No TikTok API key set.", null);
-        var data = await _socialMedia.GetTikTokUserAsync(username, discordUserId);
-        if (data == null) return ("No data from TikTok API.", null);
-        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
-        json = DecodeUnicodeEscapes(json);
-        return (json, json);
+        var smc = Context.Interaction as SocketMessageComponent;
+        if (smc == null) return;
+
+        var parts = ck.Split('_');
+        string sessionId, username;
+        if (parts.Length >= 3) { sessionId = parts[0]; username = parts[2]; }
+        else if (parts.Length == 2) { sessionId = parts[0]; username = parts[1]; }
+        else { await smc.RespondAsync("[ERR] invalid session.", ephemeral: true); return; }
+
+        if (!_sessionUser.ContainsKey(sessionId))
+        {
+            await smc.RespondAsync("[ERR] session expired, run /social username again.", ephemeral: true);
+            return;
+        }
+
+        try
+        {
+            var (emb, img, menu) = await buildProfile(username, sessionId);
+            var comp4 = new ComponentBuilder().WithSelectMenu(menu).Build();
+            if (img != null)
+            {
+                var att4 = new List<FileAttachment> { new FileAttachment(img, "profile-lookup.jpg") };
+                await smc.UpdateAsync(msg => { msg.Embed = emb; msg.Components = comp4; msg.Attachments = att4; });
+            }
+            else
+            {
+                await smc.UpdateAsync(msg => { msg.Embed = emb; msg.Components = comp4; });
+            }
+        }
+        catch
+        {
+            await smc.UpdateAsync(msg =>
+            {
+                msg.Embed = new EmbedBuilder()
+                    .WithDescription($"```\ntarget: {username}\nstatus: ready\nplatforms: ig, reddit, gh, twitter, tiktok, linkedin, pinterest, fb\n```")
+                    .WithColor(new Color(0x55, 0x55, 0x55))
+                    .WithCurrentTimestamp()
+                    .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
+                    .Build();
+                msg.Components = new ComponentBuilder().WithSelectMenu(buildMenu(sessionId)).Build();
+            });
+        }
     }
 
-    private async Task<(string summary, string? rawJson)> FetchLinkedInApi(string username, string discordUserId)
+    // tool definitions per platform
+    private List<ToolDef>? getTools(string platform)
     {
-        var key = await _apiKeyService.GetApiKeyAsync(discordUserId, "linkedin");
-        if (string.IsNullOrEmpty(key)) return ("No LinkedIn API key set.", null);
-        var data = await _socialMedia.GetLinkedInUserAsync(username, discordUserId);
-        if (data == null) return ("No data from LinkedIn API.", null);
-        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
-        json = DecodeUnicodeEscapes(json);
-        return (json, json);
+        return platform switch
+        {
+            "instagram" => new()
+            {
+                new ToolDef { Id = "socialapi", Name = "instagram socialapi", Fetch = fetchSocialApiIg },
+                new ToolDef { Id = "serpapi", Name = "instagram serpapi", Fetch = fetchSerpIg }
+            },
+            "twitter" => new()
+            {
+                new ToolDef { Id = "apify_twitter", Name = "twitter apify", Fetch = fetchApifyTwitter },
+                new ToolDef { Id = "twitter_api", Name = "twitter api v2", Fetch = fetchTwitter }
+            },
+            "tiktok" => new()
+            {
+                new ToolDef { Id = "apify_tiktok", Name = "tiktok apify", Fetch = fetchApifyTikTok },
+                new ToolDef { Id = "tiktok_api", Name = "tiktok rapidapi", Fetch = fetchTikTok }
+            },
+            "linkedin" => new()
+            {
+                new ToolDef { Id = "apify_linkedin", Name = "linkedin apify", Fetch = fetchApifyLinkedIn },
+                new ToolDef { Id = "linkedin_api", Name = "linkedin rapidapi", Fetch = fetchLinkedIn }
+            },
+            "pinterest" => new()
+            {
+                new ToolDef { Id = "apify_pinterest", Name = "pinterest apify", Fetch = fetchApifyPinterest },
+                new ToolDef { Id = "pinterest_api", Name = "pinterest rapidapi", Fetch = fetchPinterest }
+            },
+            "reddit" => new()
+            {
+                new ToolDef { Id = "apify_reddit", Name = "reddit apify", Fetch = fetchReddit }
+            },
+            "github" => new()
+            {
+                new ToolDef { Id = "github_public", Name = "github public api", Fetch = fetchGitHub },
+                new ToolDef { Id = "apify_github", Name = "github apify", Fetch = fetchApifyGitHub }
+            },
+            "facebook" => new()
+            {
+                new ToolDef { Id = "serpapi_facebook", Name = "facebook serpapi", Fetch = fetchFacebookSerp },
+                new ToolDef { Id = "apify_facebook", Name = "facebook apify", Fetch = fetchApifyFacebook }
+            },
+            _ => null
+        };
     }
 
-    private async Task<(string summary, string? rawJson)> FetchTelegramApi(string username, string discordUserId)
+    // instagram fetchers
+    private async Task<(string summary, string? raw)> fetchSocialApiIg(string username, string discordId)
     {
-        var key = await _apiKeyService.GetApiKeyAsync(discordUserId, "telegram");
-        if (string.IsNullOrEmpty(key)) return ("No Telegram API key set.", null);
-        var data = await _socialMedia.GetTelegramUserAsync(username, discordUserId);
-        if (data == null) return ("No data from Telegram API.", null);
-        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
-        json = DecodeUnicodeEscapes(json);
-        return (json, json);
-    }
+        var token = await _apiKeySvc.GetApiKeyAsync(discordId, "socialapi");
+        if (string.IsNullOrEmpty(token)) return ("[ERR] add a socialapi key first", null);
+        try
+        {
+            var data = await _sm.GetSocialApisInstagramUserAsync(username, token);
+            if (data == null) return ("[ERR] no data from socialapis.io", null);
+            if (data["error"] != null) return ($"[ERR] socialapis: {data["error"]}", null);
 
-    private async Task<(string summary, string? rawJson)> FetchPinterestApi(string username, string discordUserId)
-    {
-        var key = await _apiKeyService.GetApiKeyAsync(discordUserId, "pinterest");
-        if (string.IsNullOrEmpty(key)) return ("No Pinterest API key set.", null);
-        var data = await _socialMedia.GetPinterestUserAsync(username, discordUserId);
-        if (data == null) return ("No data from Pinterest API.", null);
-        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
-        json = DecodeUnicodeEscapes(json);
-        return (json, json);
-    }
+            var pretty = JsonConvert.SerializeObject(data, Formatting.Indented);
+            var fullN = data["data"]?["full_name"]?.Value<string>() ?? data["full_name"]?.Value<string>() ?? "n/a";
+            var accId = data["data"]?["id"]?.Value<string>() ?? data["id"]?.Value<string>() ?? "n/a";
+            var followers = data["data"]?["followers_count"]?.Value<int>() ?? data["followers_count"]?.Value<int>() ?? 0;
+            var following = data["data"]?["following_count"]?.Value<int>() ?? data["following_count"]?.Value<int>() ?? 0;
+            var posts = data["data"]?["media_count"]?.Value<int>() ?? data["media_count"]?.Value<int>() ?? 0;
+            var isPriv = data["data"]?["is_private"]?.Value<bool>() ?? data["is_private"]?.Value<bool>() ?? false;
+            var isVerif = data["data"]?["is_verified"]?.Value<bool>() ?? data["is_verified"]?.Value<bool>() ?? false;
+            var accT = data["data"]?["is_business_account"]?.Value<bool>() ?? data["is_business_account"]?.Value<bool>() ?? false;
+            var extUrl = data["data"]?["external_url"]?.Value<string>() ?? data["external_url"]?.Value<string>() ?? "none";
+            if (string.IsNullOrEmpty(extUrl)) extUrl = "none";
 
-    private async Task<(string summary, string? rawJson)> FetchRedditAuthor(string username, string discordUserId)
-    {
-        var token = await _apiKeyService.GetApiKeyAsync(discordUserId, "apify");
-        if (string.IsNullOrEmpty(token))
-            return ("add an api key first (use /admin setkey apify <apify_token>)", null);
-        
-        var data = await _socialMedia.GetRedditAuthorAsync(username, token);
-        if (data == null) return ("No data returned from Apify Reddit scraper.", null);
-        
-        var prettyJson = JsonConvert.SerializeObject(data, Formatting.Indented);
-        prettyJson = DecodeUnicodeEscapes(prettyJson);
-        
-        var displayName = data["name"]?.Value<string>() ?? "N/A";
-        var bio = data["about"]?.Value<string>() ?? "No bio";
-        var createdRaw = data["created"]?.Value<string>() ?? "";
-        var accountAge = "Unknown";
-        if (DateTime.TryParse(createdRaw, out var createdDate))
-            accountAge = $"{(DateTime.UtcNow - createdDate).Days} days";
-        
-        var postKarma = data["post_karma"]?.Value<int>() ?? 0;
-        var commentKarma = data["comment_karma"]?.Value<int>() ?? 0;
-        var totalKarma = postKarma + commentKarma;
-        
-        var isVerified = data["verified"]?.Value<bool>() ?? false;
-        var isPremium = data["is_premium"]?.Value<bool>() ?? false;
-        var isEmployee = data["is_employee"]?.Value<bool>() ?? false;
-        var isModerator = data["is_moderator"]?.Value<bool>() ?? false;
-        var isSuspended = data["is_suspended"]?.Value<bool>() ?? false;
-        
-        var moderatedList = data["moderated"]?.Select(s => s.ToString()).ToList() ?? new List<string>();
-        var moderatedStr = moderatedList.Count > 0 ? string.Join(", ", moderatedList.Take(5)) : "None";
-        if (moderatedList.Count > 5) moderatedStr += "...";
-        
-        var trophiesCount = data["trophies"]?.Count() ?? 0;
-        var multiredditsCount = data["multireddits"]?.Count() ?? 0;
-        
-        var summary = $"=================================\n" +
-                    $" Reddit Profile: {username}\n" +
+            var s = $"=================================\n" +
+                    $" profile summary ==> {username}\n" +
                     $"=================================\n" +
-                    $"Display Name : {displayName}\n" +
-                    $"Bio          : {bio}\n" +
-                    $"Account Age  : {accountAge}\n" +
-                    $"Post Karma   : {postKarma}\n" +
-                    $"Comment Karma: {commentKarma}\n" +
-                    $"Total Karma  : {totalKarma}\n" +
-                    $"Verified     : {(isVerified ? "Yes" : "No")}\n" +
-                    $"Premium      : {(isPremium ? "Yes" : "No")}\n" +
-                    $"Employee     : {(isEmployee ? "Yes" : "No")}\n" +
-                    $"Moderator    : {(isModerator ? "Yes" : "No")}\n" +
-                    $"Suspended    : {(isSuspended ? "Yes" : "No")}\n" +
-                    $"Moderates    : {moderatedStr}\n" +
-                    $"Trophies     : {trophiesCount}\n" +
-                    $"Multireddits : {multiredditsCount}\n" +
+                    $"full name      : {fullN}\n" +
+                    $"account id     : {accId}\n" +
+                    $"followers      : {followers}\n" +
+                    $"following      : {following}\n" +
+                    $"posts          : {posts}\n" +
+                    $"private        : {(isPriv ? "yes" : "no")}\n" +
+                    $"verified       : {(isVerif ? "yes" : "no")}\n" +
+                    $"account type   : {(accT ? "business" : "personal")}\n" +
+                    $"external url   : {extUrl}\n" +
                     $"=================================";
-        return (summary, prettyJson);
+            return (s, pretty);
+        }
+        catch (Exception ex) { return ($"[ERR] socialapi: {ex.Message}", null); }
     }
 
-    private async Task<(string summary, string? rawJson)> FetchGitHubApi(string username, string _)
+    private async Task<(string summary, string? raw)> fetchSerpIg(string username, string discordId)
     {
-        var data = await _socialMedia.GetGitHubUserAsync(username);
-        if (data == null) return ("User not found.", null);
+        var token = await _apiKeySvc.GetApiKeyAsync(discordId, "serpapi");
+        if (string.IsNullOrEmpty(token)) return ("[ERR] add a serpapi key first", null);
+        try
+        {
+            var data = await _sm.GetSerpApiInstagramUserAsync(username, token);
+            if (data == null) return ("[ERR] no data from serpapi", null);
+            if (data["error"] != null) return ($"[ERR] serpapi: {data["error"]}", null);
+
+            var pretty = JsonConvert.SerializeObject(data, Formatting.Indented);
+            var fn = data["full_name"]?.Value<string>() ?? "n/a";
+            var ai = data["id"]?.Value<string>() ?? "n/a";
+            var fw = data["followers"]?.Value<int>() ?? 0;
+            var fg = data["following"]?.Value<int>() ?? 0;
+            var po = data["posts_count"]?.Value<int>() ?? 0;
+            var ip = data["is_private"]?.Value<bool>() ?? false;
+            var iv = data["is_verified"]?.Value<bool>() ?? false;
+            var ib = data["is_business_account"]?.Value<bool>() ?? false;
+            var eu = data["external_url"]?.Value<string>() ?? "none";
+            if (string.IsNullOrEmpty(eu)) eu = "none";
+            var ca = data["created_at"]?.Value<string>() ?? "n/a";
+            var cd = DateTime.TryParse(ca, out var dt) ? dt.ToString("yyyy-MM-dd") : ca;
+            var pp = data["profile_pic_url"]?.Value<string>() ?? "n/a";
+
+            var s = $"=================================\n" +
+                    $" profile summary ==> {username}\n" +
+                    $"=================================\n" +
+                    $"full name      : {fn}\n" +
+                    $"account id     : {ai}\n" +
+                    $"followers      : {fw}\n" +
+                    $"following      : {fg}\n" +
+                    $"posts          : {po}\n" +
+                    $"private        : {(ip ? "yes" : "no")}\n" +
+                    $"verified       : {(iv ? "yes" : "no")}\n" +
+                    $"account type   : {(ib ? "business" : "personal")}\n" +
+                    $"external url   : {eu}\n" +
+                    $"created at     : {cd}\n" +
+                    $"profile pic    : {pp}\n" +
+                    $"=================================";
+            return (s, pretty);
+        }
+        catch (Exception ex) { return ($"[ERR] serpapi: {ex.Message}", null); }
+    }
+
+    // rapidapi fetchers
+    private async Task<(string summary, string? raw)> fetchTwitter(string username, string discordId)
+    {
+        var key = await _apiKeySvc.GetApiKeyAsync(discordId, "twitter");
+        if (string.IsNullOrEmpty(key)) return ("[ERR] no twitter api key, use /setapikey twitter <token>", null);
+        var data = await _sm.GetTwitterUserAsync(username, discordId);
+        if (data == null) return ("[ERR] no data from twitter api", null);
+        var json = decodeUnicode(JsonConvert.SerializeObject(data, Formatting.Indented));
+        return (json, json);
+    }
+
+    private async Task<(string summary, string? raw)> fetchTikTok(string username, string discordId)
+    {
+        var key = await _apiKeySvc.GetApiKeyAsync(discordId, "tiktok");
+        if (string.IsNullOrEmpty(key)) return ("[ERR] no tiktok api key", null);
+        var data = await _sm.GetTikTokUserAsync(username, discordId);
+        if (data == null) return ("[ERR] no data from tiktok api", null);
+        var json = decodeUnicode(JsonConvert.SerializeObject(data, Formatting.Indented));
+        return (json, json);
+    }
+
+    private async Task<(string summary, string? raw)> fetchLinkedIn(string username, string discordId)
+    {
+        var key = await _apiKeySvc.GetApiKeyAsync(discordId, "linkedin");
+        if (string.IsNullOrEmpty(key)) return ("[ERR] no linkedin api key", null);
+        var data = await _sm.GetLinkedInUserAsync(username, discordId);
+        if (data == null) return ("[ERR] no data from linkedin api", null);
+        var json = decodeUnicode(JsonConvert.SerializeObject(data, Formatting.Indented));
+        return (json, json);
+    }
+
+    private async Task<(string summary, string? raw)> fetchPinterest(string username, string discordId)
+    {
+        var key = await _apiKeySvc.GetApiKeyAsync(discordId, "pinterest");
+        if (string.IsNullOrEmpty(key)) return ("[ERR] no pinterest api key", null);
+        var data = await _sm.GetPinterestUserAsync(username, discordId);
+        if (data == null) return ("[ERR] no data from pinterest api", null);
+        var json = decodeUnicode(JsonConvert.SerializeObject(data, Formatting.Indented));
+        return (json, json);
+    }
+
+    private async Task<(string summary, string? raw)> fetchReddit(string username, string discordId)
+    {
+        var token = await _apiKeySvc.GetApiKeyAsync(discordId, "apify");
+        if (string.IsNullOrEmpty(token)) return ("[ERR] add an apify key first (/setapikey apify <token>)", null);
+        var data = await _sm.GetRedditAuthorAsync(username, token);
+        if (data == null) return ("[ERR] no data from apify reddit scraper", null);
+
+        var pretty = decodeUnicode(JsonConvert.SerializeObject(data, Formatting.Indented));
+        var dn = data["name"]?.Value<string>() ?? "n/a";
+        var bio = data["about"]?.Value<string>() ?? "no bio";
+        var cr = data["created"]?.Value<string>() ?? "";
+        var age = DateTime.TryParse(cr, out var cd) ? $"{(DateTime.UtcNow - cd).Days} days" : "unknown";
+        var pk = data["post_karma"]?.Value<int>() ?? 0;
+        var ck = data["comment_karma"]?.Value<int>() ?? 0;
+        var ver = data["verified"]?.Value<bool>() ?? false;
+        var prem = data["is_premium"]?.Value<bool>() ?? false;
+        var emp = data["is_employee"]?.Value<bool>() ?? false;
+        var mod = data["is_moderator"]?.Value<bool>() ?? false;
+        var sus = data["is_suspended"]?.Value<bool>() ?? false;
+        var troph = data["trophies"]?.Count() ?? 0;
+
+        var s = $"=================================\n" +
+                $" reddit profile: {username}\n" +
+                $"=================================\n" +
+                $"display name : {dn}\n" +
+                $"bio          : {bio}\n" +
+                $"account age  : {age}\n" +
+                $"post karma   : {pk}\n" +
+                $"comment karma: {ck}\n" +
+                $"total karma  : {pk + ck}\n" +
+                $"verified     : {(ver ? "yes" : "no")}\n" +
+                $"premium      : {(prem ? "yes" : "no")}\n" +
+                $"employee     : {(emp ? "yes" : "no")}\n" +
+                $"moderator    : {(mod ? "yes" : "no")}\n" +
+                $"suspended    : {(sus ? "yes" : "no")}\n" +
+                $"trophies     : {troph}\n" +
+                $"=================================";
+        return (s, pretty);
+    }
+
+    private async Task<(string summary, string? raw)> fetchGitHub(string username, string _)
+    {
+        var data = await _sm.GetGitHubUserAsync(username);
+        if (data == null) return ("[ERR] user not found", null);
         var name = data["name"]?.Value<string>() ?? username;
         var repos = data["public_repos"]?.Value<int>() ?? 0;
-        var followers = data["followers"]?.Value<int>() ?? 0;
-        var following = data["following"]?.Value<int>() ?? 0;
-        var bio = data["bio"]?.Value<string>() ?? "None";
-        var summary = $"Name: {name}\nBio: {bio}\nPublic Repos: {repos}\nFollowers: {followers}\nFollowing: {following}";
-        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
-        json = DecodeUnicodeEscapes(json);
-        return (summary, json);
+        var fw = data["followers"]?.Value<int>() ?? 0;
+        var fg = data["following"]?.Value<int>() ?? 0;
+        var bio = data["bio"]?.Value<string>() ?? "none";
+        var json = decodeUnicode(JsonConvert.SerializeObject(data, Formatting.Indented));
+        var s = $"name: {name}\nbio: {bio}\npublic repos: {repos}\nfollowers: {fw}\nfollowing: {fg}";
+        return (s, json);
     }
 
-    private class ToolInfo
+    // apify fetchers
+    private async Task<(string summary, string? raw)> fetchApifyTwitter(string username, string discordId)
+    {
+        var token = await _apiKeySvc.GetApiKeyAsync(discordId, "apify");
+        if (string.IsNullOrEmpty(token)) return ("[ERR] add an apify key first", null);
+        var data = await _sm.GetTwitterUserByApify(username, token);
+        if (data == null) return ("[ERR] no data from apify twitter", null);
+        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
+        return (json.Length > 4000 ? json[..4000] + "...(truncated)" : json, json);
+    }
+
+    private async Task<(string summary, string? raw)> fetchApifyTikTok(string username, string discordId)
+    {
+        var token = await _apiKeySvc.GetApiKeyAsync(discordId, "apify");
+        if (string.IsNullOrEmpty(token)) return ("[ERR] add an apify key first", null);
+        var data = await _sm.GetTikTokUserByApify(username, token);
+        if (data == null) return ("[ERR] no data from apify tiktok", null);
+        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
+        return (json.Length > 4000 ? json[..4000] + "...(truncated)" : json, json);
+    }
+
+    private async Task<(string summary, string? raw)> fetchApifyLinkedIn(string username, string discordId)
+    {
+        var token = await _apiKeySvc.GetApiKeyAsync(discordId, "apify");
+        if (string.IsNullOrEmpty(token)) return ("[ERR] add an apify key first", null);
+        var data = await _sm.GetLinkedInUserByApify(username, token);
+        if (data == null) return ("[ERR] no data from apify linkedin", null);
+        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
+        return (json.Length > 4000 ? json[..4000] + "...(truncated)" : json, json);
+    }
+
+    private async Task<(string summary, string? raw)> fetchApifyPinterest(string username, string discordId)
+    {
+        var token = await _apiKeySvc.GetApiKeyAsync(discordId, "apify");
+        if (string.IsNullOrEmpty(token)) return ("[ERR] add an apify key first", null);
+        var data = await _sm.GetPinterestUserByApify(username, token);
+        if (data == null) return ("[ERR] no data from apify pinterest", null);
+        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
+        return (json.Length > 4000 ? json[..4000] + "...(truncated)" : json, json);
+    }
+
+    private async Task<(string summary, string? raw)> fetchApifyGitHub(string username, string discordId)
+    {
+        var token = await _apiKeySvc.GetApiKeyAsync(discordId, "apify");
+        if (string.IsNullOrEmpty(token)) return ("[ERR] add an apify key first", null);
+        var data = await _sm.GetGitHubUserByApify(username, token);
+        if (data == null) return ("[ERR] no data from apify github", null);
+        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
+        return (json.Length > 4000 ? json[..4000] + "...(truncated)" : json, json);
+    }
+
+    private async Task<(string summary, string? raw)> fetchFacebookSerp(string username, string discordId)
+    {
+        var token = await _apiKeySvc.GetApiKeyAsync(discordId, "serpapi");
+        if (string.IsNullOrEmpty(token)) return ("[ERR] add a serpapi key first", null);
+        var client = _http.CreateClient();
+        var url = $"https://serpapi.com/search?engine=facebook_profile&username={Uri.EscapeDataString(username)}&api_key={token}";
+        try
+        {
+            var response = await client.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return ($"[ERR] serpapi http {response.StatusCode}", null);
+            var json = await response.Content.ReadAsStringAsync();
+            var data = JObject.Parse(json);
+            if (data["error"] != null) return ($"[ERR] serpapi: {data["error"]}", json);
+
+            var pretty = JsonConvert.SerializeObject(data, Formatting.Indented);
+            var name = data["name"]?.ToString() ?? "n/a";
+            var followers = data["followers"]?.ToString() ?? "0";
+            var about = data["about"]?.ToString() ?? "none";
+            var location = data["location"]?.ToString() ?? "unknown";
+            var s = $"=================================\n" +
+                    $" facebook profile: {username}\n" +
+                    $"=================================\n" +
+                    $"name      : {name}\n" +
+                    $"followers : {followers}\n" +
+                    $"about     : {about}\n" +
+                    $"location  : {location}\n" +
+                    $"=================================";
+            return (s, pretty);
+        }
+        catch (Exception ex) { return ($"[ERR] serpapi: {ex.Message}", null); }
+    }
+
+    private async Task<(string summary, string? raw)> fetchApifyFacebook(string username, string discordId)
+    {
+        var token = await _apiKeySvc.GetApiKeyAsync(discordId, "apify");
+        if (string.IsNullOrEmpty(token)) return ("[ERR] add an apify key first", null);
+        var data = await _sm.GetFacebookUserByApify(username, token);
+        if (data == null) return ("[ERR] no data from apify facebook", null);
+        var json = JsonConvert.SerializeObject(data, Formatting.Indented);
+        return (json.Length > 4000 ? json[..4000] + "...(truncated)" : json, json);
+    }
+
+    private class ToolDef
     {
         public string? Id { get; set; }
         public string? Name { get; set; }
