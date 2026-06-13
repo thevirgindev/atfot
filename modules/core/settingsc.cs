@@ -49,10 +49,10 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
         await RespondAsync(embed: emb);
     }
 
-    [SlashCommand("set", "update a setting (use: theme dark/gray/white | notifications silent/public | ai_summary on/off | ai_chat true/false | system_prompt <text>)")]
+    [SlashCommand("set", "update theme | notifications | ai_summary | ai_chat | system_prompt")]
     public async Task Set(
         [Summary("key", "theme, notifications, ai_summary, ai_chat, system_prompt")] string key,
-        [Summary("value", "theme: dark/gray/white · notifications: silent/public · ai_summary: on/off · ai_chat: true/false · system_prompt: any text")] string value)
+        [Summary("value", "theme | notifications | ai_summary | ai_chat | system_prompt (see guide)")] string value)
     {
         if (!await isAuthed()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         if (_cd.IsOnCooldown(Context.User.Id.ToString(), out var rem))
