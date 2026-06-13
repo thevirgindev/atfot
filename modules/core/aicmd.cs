@@ -44,7 +44,7 @@ public class AiCmd : InteractionModuleBase<SocketInteractionContext>
         await DeferAsync();
 
         var userSettings = await _settings.GetUserSettingsAsync(Context.User.Id.ToString());
-        var sysPrompt = userSettings.ChatSystemPrompt ?? "you are atfot's ai assistant. help with osint analysis, technical questions, and general knowledge. be concise and direct.";
+        var sysPrompt = string.IsNullOrEmpty(userSettings.SystemPrompt) ? "you are atfot's ai assistant. help with osint analysis, technical questions, and general knowledge. be concise and direct." : userSettings.SystemPrompt;
 
         var reply = await _ai.chatAsync(Context.User.Id.ToString(), message, sysPrompt);
 
