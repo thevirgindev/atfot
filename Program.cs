@@ -45,6 +45,8 @@ class Program
                 {
                     Log.Warning("Owner Discord ID not set in environment variables.");
                 }
+                await client.SetStatusAsync(UserStatus.Online);
+                await client.SetGameAsync("ATFOT – OSINT Tools | /guide");
                 Log.Information("ATFOT is ready. Logged in as {BotName} (ID: {BotId})", client.CurrentUser.Username, client.CurrentUser.Id);
             };
 
