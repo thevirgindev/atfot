@@ -30,7 +30,7 @@ public class ReportCmd : InteractionModuleBase<SocketInteractionContext>
         }
         if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
         {
-            await RespondAsync($"⏳ Wait {remaining.TotalSeconds:F0}s.", ephemeral: true);
+            await RespondAsync($"[WARN] wait {remaining.TotalSeconds:F0}s.", ephemeral: true);
             return;
         }
         _cooldown.SetUsed(Context.User.Id.ToString());

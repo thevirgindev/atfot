@@ -19,6 +19,8 @@ public class GeolocationCmd : InteractionModuleBase<SocketInteractionContext>
     private readonly ExportService _export;
     private readonly IHttpClientFactory _httpFactory;
 
+    private static readonly Dictionary<ulong, (string summary, string? rawJson, string targetLookup)> _exportCache = new();
+
     public GeolocationCmd(
         KeyRedemptionService keyService,
         CooldownService cooldown,
@@ -40,28 +42,21 @@ public class GeolocationCmd : InteractionModuleBase<SocketInteractionContext>
 
     [SlashCommand("locate", "convert address or coordinates to map links and SunCalc data")]
     public async Task Locate(
-        [Summary("location", "address, city, or lat,lon coordinates")] string location,
-        [Summary("export", "export format (none, txt, json)")] string export = "none")
+        [Summary("location", "address, city, or lat,lon coordinates")] string location)
     {
         if (!await EnsureAuthorized())
         {
-            await RespondAsync("🔒 You need to redeem a master key first using `/redeem`.", ephemeral: true);
+            await RespondAsync("[ERR] you need to redeem a master key first using `/redeem`.", ephemeral: true);
             return;
         }
         if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
         {
-            await RespondAsync($"⏳ Please wait {remaining.TotalSeconds:F0} seconds.", ephemeral: true);
+            await RespondAsync($"[WARN] please wait {remaining.TotalSeconds:F0} seconds.", ephemeral: true);
             return;
         }
         _cooldown.SetUsed(Context.User.Id.ToString());
 
         await DeferAsync();
-
-        var dto = new ScanResultDto
-        {
-            TargetLookup = location,
-            ModuleSource = "geolocation"
-        };
 
         string encoded = Uri.EscapeDataString(location);
         var links = new List<string>
@@ -72,7 +67,9 @@ public class GeolocationCmd : InteractionModuleBase<SocketInteractionContext>
             $"[What3Words](https://what3words.com/) (enter manually)",
             $"[GPS Visualizer](https://www.gpsvisualizer.com/maps?q={encoded})"
         };
-        dto.DeepLinks = links;
+
+        string dataSummary = "";
+        string? rawJson = null;
 
         try
         {
@@ -81,32 +78,87 @@ public class GeolocationCmd : InteractionModuleBase<SocketInteractionContext>
             var response = await client.GetAsync($"https://nominatim.openstreetmap.org/search?q={encoded}&format=json&limit=1");
             if (response.IsSuccessStatusCode)
             {
-                var json = await response.Content.ReadAsStringAsync();
-                dto.RawApiResponse = json;
-                var array = JArray.Parse(json);
+                rawJson = await response.Content.ReadAsStringAsync();
+                var array = JArray.Parse(rawJson);
                 if (array.Count > 0)
                 {
-                    var lat = array[0]["lat"]?.ToString();
-                    var lon = array[0]["lon"]?.ToString();
-                    dto.ExtractedData["nominatim_lat"] = lat ?? "unknown";
-                    dto.ExtractedData["nominatim_lon"] = lon ?? "unknown";
-                    dto.Summary = $"Coordinates: {lat}, {lon}";
+                    var lat = array[0]["lat"]?.ToString() ?? "?";
+                    var lon = array[0]["lon"]?.ToString() ?? "?";
+                    var displayName = array[0]["display_name"]?.ToString() ?? location;
+                    var city = array[0]["address"]?["city"]?.ToString()
+                        ?? array[0]["address"]?["town"]?.ToString()
+                        ?? array[0]["address"]?["village"]?.ToString()
+                        ?? "?";
+                    var country = array[0]["address"]?["country"]?.ToString() ?? "?";
+                    var category = array[0]["category"]?.ToString() ?? "?";
+                    var type = array[0]["type"]?.ToString() ?? "?";
+
+                    dataSummary =
+                        $"**Location:** {displayName}\n" +
+                        $"**Coordinates:** {lat}, {lon}\n" +
+                        $"**City:** {city}\n" +
+                        $"**Country:** {country}\n" +
+                        $"**Category:** {category} ({type})\n\n" +
+                        $"**Maps & Analysis:**\n{string.Join("\n", links)}";
                 }
+                else
+                {
+                    dataSummary = $"**Location:** `{location}`\nNo results from Nominatim.\n\n**Maps & Analysis:**\n{string.Join("\n", links)}";
+                }
+            }
+            else
+            {
+                dataSummary = $"**Location:** `{location}`\nNominatim returned HTTP {response.StatusCode}.\n\n**Maps & Analysis:**\n{string.Join("\n", links)}";
             }
         }
         catch (Exception ex)
         {
-            dto.ExtractedData["geocode_error"] = ex.Message;
+            dataSummary = $"**Location:** `{location}`\nGeocode error: {ex.Message}\n\n**Maps & Analysis:**\n{string.Join("\n", links)}";
         }
 
-        var description = $"**Location:** `{location}`\n\n**Map & Analysis Links:**\n{string.Join("\n", links)}";
-        var embed = _embed.CreateMonochromeEmbed("geospatial analysis", description, "dark");
+        var embed = _embed.CreateMonochromeEmbed("geospatial analysis", dataSummary, "dark");
 
-        if (export.ToLower() == "json")
-            await FollowupWithFileAsync(_export.BuildJsonStream(dto), "geo.json", embed: embed);
-        else if (export.ToLower() == "txt")
-            await FollowupWithFileAsync(_export.BuildTextStream(dto), "geo.txt", embed: embed);
-        else
-            await FollowupAsync(embed: embed);
+        var msg = await FollowupAsync(embed: embed);
+
+        // Cache for export buttons
+        _exportCache[msg.Id] = (dataSummary, rawJson, location);
+
+        // Attach export buttons
+        var hasJson = !string.IsNullOrEmpty(rawJson);
+        var components = new ComponentBuilder()
+            .WithButton("TXT", $"geo_export:{msg.Id}:txt", ButtonStyle.Secondary)
+            .WithButton("JSON", $"geo_export:{msg.Id}:json", ButtonStyle.Secondary, disabled: !hasJson);
+        await msg.ModifyAsync(m => m.Components = components.Build());
+    }
+
+    [ComponentInteraction("geo_export:*:*", ignoreGroupNames: true)]
+    public async Task HandleGeoExport(string msgIdStr, string format)
+    {
+        await DeferAsync(ephemeral: true);
+        if (!ulong.TryParse(msgIdStr, out var msgId) || !_exportCache.TryGetValue(msgId, out var data))
+        {
+            await FollowupAsync("Export data expired or not found. Run the command again.", ephemeral: true);
+            return;
+        }
+
+        if (format == "json" && string.IsNullOrEmpty(data.rawJson))
+        {
+            await FollowupAsync("No raw JSON data to export.", ephemeral: true);
+            return;
+        }
+
+        var dto = new ScanResultDto
+        {
+            TargetLookup = data.targetLookup,
+            ModuleSource = "geolocation",
+            RawApiResponse = data.rawJson,
+            Summary = data.summary
+        };
+
+        string filename = $"geo_{data.targetLookup.Replace(" ", "_").Replace(",", "")}_{DateTime.Now:yyyyMMddHHmmss}";
+        using var stream = format == "json"
+            ? _export.BuildJsonStream(dto)
+            : _export.BuildTextStream(dto);
+        await FollowupWithFileAsync(stream, $"{filename}.{format}", $"Exported geolocation data.");
     }
 }

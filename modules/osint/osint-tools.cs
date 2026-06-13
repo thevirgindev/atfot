@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
-using Discord.WebSocket;
 using Newtonsoft.Json.Linq;
+using atfot.core.http;
 using atfot.core.services;
 using atfot.models;
 using atfot.utils;
@@ -14,7 +16,7 @@ using atfot.utils;
 namespace atfot.modules.osint;
 
 [Group("osint", "extended OSINT utilities")]
-public class OsintToolsCmd : InteractionModuleBase<SocketInteractionContext>
+public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly KeyRedemptionService _keyService;
     private readonly ApiKeyService _apiKeyService;
@@ -23,8 +25,11 @@ public class OsintToolsCmd : InteractionModuleBase<SocketInteractionContext>
     private readonly ExportService _export;
     private readonly IHttpClientFactory _httpFactory;
 
+    // Cache for export buttons: "osint_{loadingMsgId}_{cmdName}" -> (summary, rawJson, targetLookup)
+    private static readonly Dictionary<string, (string summary, string? rawJson, string targetLookup)> _exportCache = new();
+
     public OsintToolsCmd(KeyRedemptionService keyService, ApiKeyService apiKeyService, CooldownService cooldown,
-        EmbedBuilderService embed, ExportService export, IHttpClientFactory httpFactory)
+        EmbedBuilderService embed, ExportService export, IHttpClientFactory httpFactory, BotConfig botConfig)
     {
         _keyService = keyService;
         _apiKeyService = apiKeyService;
@@ -36,248 +41,231 @@ public class OsintToolsCmd : InteractionModuleBase<SocketInteractionContext>
 
     private async Task<bool> EnsureAuthorized() => await _keyService.IsAuthorizedAsync(Context.User.Id.ToString());
 
-    private async Task ShowResult(ulong msgId, string title, string content, string? rawJson = null)
+    private async Task ShowResult(ulong msgId, string cmdName, string title, string content, string? rawJson = null, bool showButtons = true)
     {
         var embed = new EmbedBuilder()
             .WithTitle(title)
             .WithDescription($"```\n{content}\n```")
             .WithColor(new Color(0x55, 0x55, 0x55))
             .WithCurrentTimestamp()
-            .WithFooter(f => f.Text = "ATFOT || made by @thevirgindev")
+            .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
             .Build();
-
         var channel = Context.Channel;
-        if (channel == null) return;  // Fix: guard against null channel
-
+        if (channel == null) return;
         var msg = await channel.GetMessageAsync(msgId) as IUserMessage;
         if (msg != null)
         {
-            await msg.ModifyAsync(m => { m.Embed = embed; m.Components = null; });
-            if (!string.IsNullOrEmpty(rawJson))
+            if (showButtons)
             {
-                var dto = new ScanResultDto { TargetLookup = title, ModuleSource = "osinttool", RawApiResponse = rawJson, Summary = content };
-                using var stream = _export.BuildJsonStream(dto);
-                await channel.SendFileAsync(stream, "result.json", "Exported data.");
+                var cacheKey = $"osint_{msgId}_{cmdName}";
+                _exportCache[cacheKey] = (content, rawJson, title);
+
+                var hasJson = !string.IsNullOrEmpty(rawJson);
+                var components = new ComponentBuilder()
+                    .WithButton("TXT", $"osint_export:{cacheKey}:txt", ButtonStyle.Secondary)
+                    .WithButton("JSON", $"osint_export:{cacheKey}:json", ButtonStyle.Secondary, disabled: !hasJson)
+                    .Build();
+
+                await msg.ModifyAsync(m => { m.Embed = embed; m.Components = components; });
+            }
+            else
+            {
+                await msg.ModifyAsync(m => { m.Embed = embed; m.Components = null; });
             }
         }
+    }
+
+    private async Task ShowError(ulong msgId, string message)
+    {
+        var embed = new EmbedBuilder()
+            .WithDescription($"[err] {message}")
+            .WithColor(new Color(0x55, 0x55, 0x55))
+            .WithCurrentTimestamp()
+            .WithFooter(f => f.Text = EmbedBuilderService.FooterText)
+            .Build();
+        var channel = Context.Channel;
+        if (channel == null) return;
+        var msg = await channel.GetMessageAsync(msgId) as IUserMessage;
+        if (msg != null)
+            await msg.ModifyAsync(m => { m.Embed = embed; m.Components = null; });
     }
 
     private async Task<string> RunCli(string command, string args, int timeoutSec = 30)
     {
-        var psi = new ProcessStartInfo
+        try
         {
-            FileName = command,
-            Arguments = args,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
+            var psi = new ProcessStartInfo
+            {
+                FileName = command,
+                Arguments = args,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            using var proc = new Process { StartInfo = psi };
+
+            try
+            {
+                proc.Start();
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == 2)
+            {
+                return $"[ERR] command '{command}' not found.\nthis tool is only available when running the bot inside the Docker container.\nplease use the official ATFOT Docker image.";
+            }
+
+            var outputTask = proc.StandardOutput!.ReadToEndAsync();
+            var errorTask = proc.StandardError!.ReadToEndAsync();
+            if (await Task.WhenAny(proc.WaitForExitAsync(), Task.Delay(timeoutSec * 1000)) != proc.WaitForExitAsync())
+            {
+                proc.Kill();
+                return $"[WARN] timeout after {timeoutSec} seconds.";
+            }
+            await outputTask;
+            await errorTask;
+            var output = outputTask.Result;
+            var error = errorTask.Result;
+            return string.IsNullOrEmpty(error) ? output : output + "\n--- STDERR ---\n" + error;
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 2)
+        {
+            return $"[ERR] command '{command}' not found.\nthis tool is only available when running the bot inside the Docker container.\nplease use the official ATFOT Docker image.";
+        }
+        catch (Exception ex) when (ex.Message.Contains("No such file") || ex.Message.Contains("not found"))
+        {
+            return $"[ERR] command '{command}' not found.\nthis tool is only available when running the bot inside the Docker container.\nplease use the official ATFOT Docker image.";
+        }
+    }
+
+    private async Task<T?> ExecuteWithKeyRotation<T>(string discordId, string service, Func<string, Task<T>> apiCall, Func<T, bool>? isRateLimit = null, Func<T, bool>? isQuotaError = null)
+    {
+        var keyResult = await _apiKeyService.GetNextAvailableKeyAsync(discordId, service);
+        if (keyResult == null) return default;
+        try
+        {
+            var result = await apiCall(keyResult.Value.apiKey);
+            if (isRateLimit != null && isRateLimit(result))
+            {
+                await _apiKeyService.MarkKeyRateLimitedAsync(keyResult.Value.keyId, discordId);
+                return await ExecuteWithKeyRotation(discordId, service, apiCall, isRateLimit, isQuotaError);
+            }
+            if (isQuotaError != null && isQuotaError(result))
+            {
+                await _apiKeyService.MarkKeyQuotaExhaustedAsync(keyResult.Value.keyId, discordId);
+                return await ExecuteWithKeyRotation(discordId, service, apiCall, isRateLimit, isQuotaError);
+            }
+            await _apiKeyService.IncrementUsageAsync(keyResult.Value.keyId, discordId);
+            return result;
+        }
+        catch (Exception ex) when (ex.Message.Contains("429") || ex.Message.Contains("rate limit"))
+        {
+            await _apiKeyService.MarkKeyRateLimitedAsync(keyResult.Value.keyId, discordId);
+            return await ExecuteWithKeyRotation(discordId, service, apiCall, isRateLimit, isQuotaError);
+        }
+    }
+
+    [ComponentInteraction("osint_export:*:*", ignoreGroupNames: true)]
+    public async Task HandleOsintExport(string cacheKey, string format)
+    {
+        await DeferAsync(ephemeral: true);
+        if (!_exportCache.TryGetValue(cacheKey, out var data))
+        {
+            await FollowupAsync("export data expired or not found. Run the command again.", ephemeral: true);
+            return;
+        }
+
+        if (format == "json" && string.IsNullOrEmpty(data.rawJson))
+        {
+            await FollowupAsync("no raw JSON data to export.", ephemeral: true);
+            return;
+        }
+
+        var dto = new ScanResultDto
+        {
+            TargetLookup = data.targetLookup,
+            ModuleSource = "osinttool",
+            RawApiResponse = data.rawJson,
+            Summary = data.summary
         };
-        using var proc = new Process { StartInfo = psi };
-        proc.Start();
 
-        // Fix: use null-forgiving operator because streams are guaranteed non-null after Start() with redirection enabled
-        var outputTask = proc.StandardOutput!.ReadToEndAsync();
-        var errorTask = proc.StandardError!.ReadToEndAsync();
-
-        if (await Task.WhenAny(proc.WaitForExitAsync(), Task.Delay(timeoutSec * 1000)) != proc.WaitForExitAsync())
-        {
-            proc.Kill();
-            return $"Timeout after {timeoutSec} seconds.";
-        }
-        await outputTask;
-        await errorTask;
-        var output = outputTask.Result;
-        var error = errorTask.Result;
-        return string.IsNullOrEmpty(error) ? output : error;
+        string filename = $"osint_{data.targetLookup.Replace(" ", "_").Replace("/", "_")}_{DateTime.Now:yyyyMMddHHmmss}";
+        using var stream = format == "json"
+            ? _export.BuildJsonStream(dto)
+            : _export.BuildTextStream(dto);
+        await FollowupWithFileAsync(stream, $"{filename}.{format}", $"exported OSINT data.");
     }
 
-    // ========== 1. HaveIBeenPwned (no key) ==========
-    [SlashCommand("hibp", "check if an email appears in data breaches (no key)")]
-    public async Task Hibp([Summary("email")] string email)
-    {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
-        await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription("🔍 Checking HaveIBeenPwned...").Build());
-        var client = _httpFactory.CreateClient();
-        var url = $"https://haveibeenpwned.com/api/v3/breachedaccount/{Uri.EscapeDataString(email)}";
-        client.DefaultRequestHeaders.Add("hibp-api-key", "");
-        try
-        {
-            var resp = await client.GetAsync(url);
-            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"✅ No breaches found for {email}").Build());
-                return;
-            }
-            if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {resp.StatusCode}");
-            var json = await resp.Content.ReadAsStringAsync();
-            var breaches = JArray.Parse(json);
-            var list = string.Join("\n", breaches.Select(b => 
-            {
-                var name = b["Name"]?.Value<string>() ?? "Unknown";
-                var date = b["BreachDate"]?.Value<string>() ?? "Unknown";
-                return $"- {name} ({date})";
-            }));
-            var summary = $"📧 {email} found in {breaches.Count} breaches:\n{list}";
-            await ShowResult(loading.Id, "HaveIBeenPwned", summary, json);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
-    }
+    // ==================== KEPT API COMMANDS ====================
 
-    // ========== 2. AbuseIPDB (requires key) ==========
-    [SlashCommand("abuseip", "report or check IP reputation (requires AbuseIPDB key)")]
-    public async Task AbuseIp([Summary("ip")] string ip)
-    {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
-        await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Checking AbuseIPDB for {ip}...").Build());
-        var apiKey = await _apiKeyService.GetDefaultApiKeyAsync(Context.User.Id.ToString(), "abuseipdb");
-        if (string.IsNullOrEmpty(apiKey))
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription("❌ No AbuseIPDB key set. Use `/setapikey abuseipdb <key>`").Build());
-            return;
-        }
-        var client = _httpFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("Key", apiKey);
-        var url = $"https://api.abuseipdb.com/api/v2/check?ipAddress={ip}";
-        try
-        {
-            var resp = await client.GetAsync(url);
-            if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {resp.StatusCode}");
-            var json = await resp.Content.ReadAsStringAsync();
-            var data = JObject.Parse(json)["data"];
-            if (data == null) throw new Exception("Invalid response");
-            var score = data["abuseConfidenceScore"]?.Value<int>() ?? 0;
-            var totalReports = data["totalReports"]?.Value<int>() ?? 0;
-            var country = data["countryName"]?.Value<string>() ?? "Unknown";
-            var summary = $"🌐 IP: {ip}\n⚠️ Abuse score: {score}%\n📊 Total reports: {totalReports}\n📍 Country: {country}";
-            await ShowResult(loading.Id, "AbuseIPDB", summary, json);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
-    }
-
-    // ========== 3. Hunter.io (requires key) ==========
-    [SlashCommand("hunter", "domain email search (requires Hunter key)")]
-    public async Task Hunter([Summary("domain")] string domain)
-    {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
-        await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Searching Hunter for {domain}...").Build());
-        var apiKey = await _apiKeyService.GetDefaultApiKeyAsync(Context.User.Id.ToString(), "hunter");
-        if (string.IsNullOrEmpty(apiKey))
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription("❌ No Hunter key set. Use `/setapikey hunter <key>`").Build());
-            return;
-        }
-        var client = _httpFactory.CreateClient();
-        var url = $"https://api.hunter.io/v2/domain-search?domain={domain}&api_key={apiKey}";
-        try
-        {
-            var resp = await client.GetAsync(url);
-            if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {resp.StatusCode}");
-            var json = await resp.Content.ReadAsStringAsync();
-            var data = JObject.Parse(json)["data"];
-            var emails = data?["emails"] as JArray;
-            if (emails == null || emails.Count == 0)
-            {
-                await ShowResult(loading.Id, "Hunter.io", $"No emails found for {domain}.", json);
-                return;
-            }
-            var list = string.Join("\n", emails.Take(10).Select(e => $"- {e["value"]} ({e["type"]})"));
-            var summary = $"📧 Found {emails.Count} emails for {domain}:\n{list}";
-            await ShowResult(loading.Id, "Hunter.io", summary, json);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
-    }
-
-    // ========== 4. PeopleDataLabs (requires key) ==========
+    // PeopleDataLabs
     [SlashCommand("pdl", "enrich person by email (requires PeopleDataLabs key)")]
     public async Task Pdl([Summary("email")] string email)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Enriching {email}...").Build());
-        var apiKey = await _apiKeyService.GetDefaultApiKeyAsync(Context.User.Id.ToString(), "peopledatalabs");
-        if (string.IsNullOrEmpty(apiKey))
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"enriching {email}..."));
+        var result = await ExecuteWithKeyRotation<JObject?>(
+            Context.User.Id.ToString(), "peopledatalabs",
+            async (key) => {
+                var client = _httpFactory.CreateClient();
+                client.DefaultRequestHeaders.Add("X-Api-Key", key);
+                var content = new StringContent($"{{\"email\":\"{email}\"}}", System.Text.Encoding.UTF8, "application/json");
+                var response = await client.PostAsync("https://api.peopledatalabs.com/v2/enrich/person", content);
+                if (!response.IsSuccessStatusCode) return null;
+                var json = await response.Content.ReadAsStringAsync();
+                return JObject.Parse(json);
+            });
+        if (result == null)
         {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription("❌ No PeopleDataLabs key set. Use `/setapikey peopledatalabs <key>`").Build());
+            await ShowError(loading.Id, "no working keys or no data.");
             return;
         }
-        var client = _httpFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Api-Key", apiKey);
-        var url = "https://api.peopledatalabs.com/v2/enrich/person";
-        var content = new StringContent($"{{\"email\":\"{email}\"}}", System.Text.Encoding.UTF8, "application/json");
-        try
-        {
-            var resp = await client.PostAsync(url, content);
-            if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {resp.StatusCode}");
-            var json = await resp.Content.ReadAsStringAsync();
-            var data = JObject.Parse(json)["data"];
-            if (data == null) throw new Exception("No data found");
-            var name = data["full_name"]?.Value<string>() ?? "Unknown";
-            var location = data["location"]?["name"]?.Value<string>() ?? "Unknown";
-            var job = data["job_title"]?.Value<string>() ?? "Unknown";
-            var company = data["company"]?["name"]?.Value<string>() ?? "Unknown";
-            var summary = $"👤 {email}\n📛 Name: {name}\n📍 Location: {location}\n💼 Job: {job}\n🏢 Company: {company}";
-            await ShowResult(loading.Id, "PeopleDataLabs", summary, json);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+        var data = result["data"];
+        if (data == null) throw new Exception("No data found");
+        var name = data["full_name"]?.Value<string>() ?? "Unknown";
+        var location = data["location"]?["name"]?.Value<string>() ?? "Unknown";
+        var job = data["job_title"]?.Value<string>() ?? "Unknown";
+        var company = data["company"]?["name"]?.Value<string>() ?? "Unknown";
+        var summary = $"[info] {email}\nname: {name}\nlocation: {location}\njob: {job}\ncompany: {company}";
+        await ShowResult(loading.Id, "pdl", "PeopleDataLabs", summary, result.ToString());
     }
 
-    // ========== 5. ipgeolocation.io (requires key) ==========
+    // ipgeolocation.io
     [SlashCommand("ipgeo", "geolocation by IP (requires ipgeolocation.io key)")]
     public async Task IpGeo([Summary("ip")] string ip)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Geolocating {ip}...").Build());
-        var apiKey = await _apiKeyService.GetDefaultApiKeyAsync(Context.User.Id.ToString(), "ipgeolocation");
-        if (string.IsNullOrEmpty(apiKey))
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"geolocating {ip}..."));
+        var result = await ExecuteWithKeyRotation<JObject?>(
+            Context.User.Id.ToString(), "ipgeolocation",
+            async (key) => {
+                var client = _httpFactory.CreateClient();
+                var response = await client.GetAsync($"https://api.ipgeolocation.io/ipgeo?ip={ip}&apiKey={key}");
+                if (!response.IsSuccessStatusCode) return null;
+                var json = await response.Content.ReadAsStringAsync();
+                return JObject.Parse(json);
+            });
+        if (result == null)
         {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription("❌ No ipgeolocation key set. Use `/setapikey ipgeolocation <key>`").Build());
+            await ShowError(loading.Id, "no working keys or no data.");
             return;
         }
-        var client = _httpFactory.CreateClient();
-        var url = $"https://api.ipgeolocation.io/ipgeo?ip={ip}&apiKey={apiKey}";
-        try
-        {
-            var resp = await client.GetAsync(url);
-            if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {resp.StatusCode}");
-            var json = await resp.Content.ReadAsStringAsync();
-            var data = JObject.Parse(json);
-            var city = data["city"]?.Value<string>() ?? "Unknown";
-            var country = data["country_name"]?.Value<string>() ?? "Unknown";
-            var isp = data["isp"]?.Value<string>() ?? "Unknown";
-            var lat = data["latitude"]?.Value<double>() ?? 0;
-            var lon = data["longitude"]?.Value<double>() ?? 0;
-            var summary = $"🌐 IP: {ip}\n📍 {city}, {country}\n📡 ISP: {isp}\n🌍 {lat},{lon}";
-            await ShowResult(loading.Id, "ipgeolocation.io", summary, json);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+        var city = result["city"]?.Value<string>() ?? "Unknown";
+        var country = result["country_name"]?.Value<string>() ?? "Unknown";
+        var isp = result["isp"]?.Value<string>() ?? "Unknown";
+        var lat = result["latitude"]?.Value<double>() ?? 0;
+        var lon = result["longitude"]?.Value<double>() ?? 0;
+        var summary = $"[info] ip: {ip}\n{city}, {country}\nisp: {isp}\ncoords: {lat},{lon}";
+        await ShowResult(loading.Id, "ipgeo", "ipgeolocation.io", summary, result.ToString());
     }
 
-    // ========== 6. ip-api.com (no key) ==========
-    [SlashCommand("ipapi", "geolocation by IP (free, no key)")]
+    // ip-api.com (free)
+    [SlashCommand("ipapi", "geolocation by IP (free)")]
     public async Task IpApiFree([Summary("ip")] string ip)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Checking ip-api.com for {ip}...").Build());
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"checking ip-api.com for {ip}..."));
         var client = _httpFactory.CreateClient();
         var url = $"http://ip-api.com/json/{ip}";
         try
@@ -287,7 +275,7 @@ public class OsintToolsCmd : InteractionModuleBase<SocketInteractionContext>
             var data = JObject.Parse(json);
             if (data["status"]?.Value<string>() == "fail")
             {
-                await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"❌ {data["message"]}").Build());
+                await ShowError(loading.Id, $"{data["message"]}");
                 return;
             }
             var city = data["city"]?.Value<string>() ?? "Unknown";
@@ -295,227 +283,324 @@ public class OsintToolsCmd : InteractionModuleBase<SocketInteractionContext>
             var isp = data["isp"]?.Value<string>() ?? "Unknown";
             var lat = data["lat"]?.Value<double>() ?? 0;
             var lon = data["lon"]?.Value<double>() ?? 0;
-            var summary = $"🌐 IP: {ip}\n📍 {city}, {country}\n📡 ISP: {isp}\n🌍 {lat},{lon}";
-            await ShowResult(loading.Id, "ip-api.com", summary, json);
+            var summary = $"[info] ip: {ip}\n{city}, {country}\nisp: {isp}\ncoords: {lat},{lon}";
+            await ShowResult(loading.Id, "ipapi", "ip-api.com", summary, json);
         }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+        catch (Exception ex) { await ShowError(loading.Id, $"error: {ex.Message}"); }
     }
 
-    // ========== 7. OnionEngine (requires key) ==========
+    // OnionEngine
     [SlashCommand("onion", "search dark web (requires OnionEngine key)")]
     public async Task Onion([Summary("keyword")] string keyword)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Searching OnionEngine for {keyword}...").Build());
-        var apiKey = await _apiKeyService.GetDefaultApiKeyAsync(Context.User.Id.ToString(), "onionengine");
-        if (string.IsNullOrEmpty(apiKey))
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"searching OnionEngine for {keyword}..."));
+        var result = await ExecuteWithKeyRotation<JObject?>(
+            Context.User.Id.ToString(), "onionengine",
+            async (key) => {
+                var client = _httpFactory.CreateClient();
+                var response = await client.GetAsync($"https://onionengine.com/api/search?q={Uri.EscapeDataString(keyword)}&apiKey={key}");
+                if (!response.IsSuccessStatusCode) return null;
+                var json = await response.Content.ReadAsStringAsync();
+                return JObject.Parse(json);
+            });
+        if (result == null)
         {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription("❌ No OnionEngine key set. Use `/setapikey onionengine <key>`").Build());
+            await ShowError(loading.Id, "no working keys or no results.");
             return;
         }
-        var client = _httpFactory.CreateClient();
-        var url = $"https://onionengine.com/api/search?q={Uri.EscapeDataString(keyword)}&apiKey={apiKey}";
-        try
+        var results = result["results"] as JArray;
+        if (results == null || results.Count == 0)
         {
-            var resp = await client.GetAsync(url);
-            if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {resp.StatusCode}");
-            var json = await resp.Content.ReadAsStringAsync();
-            var data = JObject.Parse(json);
-            var results = data["results"] as JArray;
-            if (results == null || results.Count == 0)
-            {
-                await ShowResult(loading.Id, "OnionEngine", $"No results for {keyword}.", json);
-                return;
-            }
-            var list = string.Join("\n", results.Take(10).Select(r => $"- {r["title"]} ({r["url"]})"));
-            var summary = $"🌐 Found {results.Count} results:\n{list}";
-            await ShowResult(loading.Id, "OnionEngine", summary, json);
+            await ShowResult(loading.Id, "onion", "OnionEngine", $"[warn] no results for {keyword}.", result.ToString(), showButtons: false);
+            return;
         }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+        var list = string.Join("\n", results.Take(10).Select(r => $"- {r["title"]} ({r["url"]})"));
+        var summary = $"[done] found {results.Count} results:\n{list}";
+        await ShowResult(loading.Id, "onion", "OnionEngine", summary, result.ToString());
     }
 
-    // ========== 8. Sherlock (CLI) ==========
-    [SlashCommand("sherlock", "search username across 400+ sites (CLI tool)")]
+    // ==================== SPIDERFOOT COMMAND ====================
+
+    [SlashCommand("sf", "run SpiderFoot OSINT aggregation via Docker CLI")]
+    public async Task SpiderFootSf([Summary("target", "IP, domain, email, or hash to scan")] string target)
+    {
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
+        await DeferAsync();
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running SpiderFoot on `{target}`... (may take 60-180 seconds)"));
+
+        var modules = "sfp_dnsresolve,sfp_shodan,sfp_virustotal,sfp_alienvault,sfp_hunter,sfp_abuseipdb,sfp_greynoise,sfp_urlscan,sfp_pwned,sfp_securitytrails,sfp_censys";
+        var rawOutput = await RunCli("sf", $" -s {target} -o json -m {modules}", 180);
+
+        // Check for errors
+        if (rawOutput.StartsWith("[ERR]") || rawOutput.StartsWith("[WARN]"))
+        {
+            await ShowError(loading.Id, rawOutput);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(rawOutput))
+        {
+            await ShowError(loading.Id, $"SpiderFoot returned empty output for `{target}`. the modules may have found nothing.");
+            return;
+        }
+
+        JToken? parsed = null;
+        if (rawOutput.TrimStart().StartsWith("["))
+        {
+            try { parsed = JArray.Parse(rawOutput); }
+            catch { }
+        }
+        else if (rawOutput.TrimStart().StartsWith("{"))
+        {
+            try { parsed = JObject.Parse(rawOutput); }
+            catch { }
+        }
+
+        if (parsed == null)
+        {
+            var truncated = rawOutput.Length > 4000 ? rawOutput[..4000] + "\n... (truncated)" : rawOutput;
+            await ShowResult(loading.Id, "sf", $"SpiderFoot — {target}", truncated, rawOutput);
+            return;
+        }
+
+        var findings = new List<(string Type, string Module, string Summary)>();
+        var openPorts = new List<string>();
+        var subdomains = new List<string>();
+        var maliciousFlags = new List<string>();
+        var emails = new List<string>();
+        var ips = new List<string>();
+        var domains = new List<string>();
+        var urls = new List<string>();
+        var otherFindings = new List<string>();
+
+        JArray results = parsed as JArray ?? new JArray(parsed);
+
+        foreach (var item in results)
+        {
+            var type = item["type"]?.ToString() ?? "UNKNOWN";
+            var module = item["module"]?.ToString() ?? "unknown";
+            var data = item["data"];
+
+            switch (type.ToUpperInvariant())
+            {
+                case "PORT":
+                    var port = data?["port"]?.ToString() ?? "?";
+                    var proto = data?["protocol"]?.ToString() ?? "tcp";
+                    var state = data?["state"]?.ToString() ?? "open";
+                    if (state == "open")
+                        openPorts.Add($"{port}/{proto}");
+                    findings.Add(("PORT", module, $"{port}/{proto} ({state})"));
+                    break;
+
+                case "SUBDOMAIN":
+                    var sub = data?["host"]?.ToString() ?? data?["subdomain"]?.ToString() ?? "";
+                    if (!string.IsNullOrEmpty(sub)) subdomains.Add(sub);
+                    findings.Add(("SUBDOMAIN", module, sub));
+                    break;
+
+                case "MALICIOUS":
+                case "THREAT":
+                    var desc = data?["description"]?.ToString() ?? data?["summary"]?.ToString() ?? module;
+                    maliciousFlags.Add(desc);
+                    findings.Add(("MALICIOUS", module, desc));
+                    break;
+
+                case "EMAIL_ADDRESS":
+                    var email = data?["email"]?.ToString() ?? data?["address"]?.ToString() ?? "";
+                    if (!string.IsNullOrEmpty(email)) emails.Add(email);
+                    findings.Add(("EMAIL", module, email));
+                    break;
+
+                case "IP_ADDRESS":
+                    var ip = data?["ip"]?.ToString() ?? data?["address"]?.ToString() ?? "";
+                    if (!string.IsNullOrEmpty(ip)) ips.Add(ip);
+                    findings.Add(("IP", module, ip));
+                    break;
+
+                case "INTERNET_NAME":
+                    var d = data?["host"]?.ToString() ?? data?["domain"]?.ToString() ?? data?["name"]?.ToString() ?? "";
+                    if (!string.IsNullOrEmpty(d) && !subdomains.Contains(d)) domains.Add(d);
+                    findings.Add(("DOMAIN", module, d));
+                    break;
+
+                case "URL":
+                    var u = data?["url"]?.ToString() ?? "";
+                    if (!string.IsNullOrEmpty(u)) urls.Add(u);
+                    findings.Add(("URL", module, u));
+                    break;
+
+                default:
+                    var summary = data?.ToString()?.Length > 100 ? data.ToString()[..100] + "..." : data?.ToString() ?? "";
+                    otherFindings.Add($"[{type}] {module}: {summary}");
+                    findings.Add((type, module, summary));
+                    break;
+            }
+        }
+
+        var lines = new List<string>();
+        lines.Add($"[done] spiderfoot scan for `{target}`");
+        lines.Add($"findings: {findings.Count}");
+
+        if (openPorts.Count > 0)
+            lines.Add($"\n**open ports:** {string.Join(", ", openPorts.Take(20))}{(openPorts.Count > 20 ? $" (+{openPorts.Count - 20} more)" : "")}");
+
+        if (subdomains.Count > 0)
+            lines.Add($"\n**subdomains:** {subdomains.Count} found — {string.Join(", ", subdomains.Take(10))}{(subdomains.Count > 10 ? $" (+{subdomains.Count - 10} more)" : "")}");
+
+        if (maliciousFlags.Count > 0)
+            lines.Add($"\n**malicious/threat detections:** {maliciousFlags.Count}\n{string.Join("\n", maliciousFlags.Take(10).Select(m => $"  - {m}"))}{(maliciousFlags.Count > 10 ? $"\n  ... and {maliciousFlags.Count - 10} more" : "")}");
+
+        if (emails.Count > 0)
+            lines.Add($"\n**emails:** {string.Join(", ", emails.Take(10))}{(emails.Count > 10 ? $" (+{emails.Count - 10} more)" : "")}");
+
+        if (ips.Count > 0)
+            lines.Add($"\n**ips:** {string.Join(", ", ips.Take(10))}{(ips.Count > 10 ? $" (+{ips.Count - 10} more)" : "")}");
+
+        if (domains.Count > 0)
+            lines.Add($"\n**domains:** {string.Join(", ", domains.Take(10))}{(domains.Count > 10 ? $" (+{domains.Count - 10} more)" : "")}");
+
+        if (urls.Count > 0)
+            lines.Add($"\n**urls:** {string.Join(", ", urls.Take(5))}{(urls.Count > 5 ? $" (+{urls.Count - 5} more)" : "")}");
+
+        if (otherFindings.Count > 0)
+            lines.Add($"\n**other findings:** {otherFindings.Count} types — {string.Join(", ", otherFindings.Take(5))}{(otherFindings.Count > 5 ? $" (+{otherFindings.Count - 5} more)" : "")}");
+
+        var summaryText = string.Join("\n", lines);
+        if (summaryText.Length > 4000)
+            summaryText = summaryText[..3900] + "\n... (truncated — download full json)";
+
+        await ShowResult(loading.Id, "sf", $"SpiderFoot — {target}", summaryText, rawOutput);
+    }
+
+    // ==================== CLI COMMANDS ====================
+
+    [SlashCommand("sherlock", "search username across 400+ sites (CLI)")]
     public async Task Sherlock([Summary("username")] string username)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running Sherlock on {username} (may take 30s)...").Build());
-        try
-        {
-            var output = await RunCli("sherlock", username, 45);
-            if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
-            await ShowResult(loading.Id, "Sherlock", output);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running Sherlock on {username}..."));
+        var output = await RunCli("sherlock", username, 45);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "sherlock", "Sherlock", output, null);
     }
 
-    // ========== 9. theHarvester (CLI) ==========
-    [SlashCommand("harvester", "gather emails/subdomains (CLI tool)")]
+    [SlashCommand("harvester", "gather emails/subdomains (CLI)")]
     public async Task Harvester([Summary("domain")] string domain)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running theHarvester on {domain} (may take 60s)...").Build());
-        try
-        {
-            var output = await RunCli("theHarvester", $"-d {domain} -b all", 90);
-            if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
-            await ShowResult(loading.Id, "theHarvester", output);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running theHarvester on {domain}..."));
+        var output = await RunCli("theHarvester", $"-d {domain} -b all", 90);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "harvester", "theHarvester", output, null);
     }
 
-    // ========== 10. SpiderFoot (CLI) ==========
-    [SlashCommand("spiderfoot", "automated OSINT scanning (CLI tool)")]
-    public async Task SpiderFoot([Summary("target")] string target)
-    {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
-        await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running SpiderFoot on {target} (may take 120s)...").Build());
-        try
-        {
-            var output = await RunCli("sf", $"-s {target} -o json", 150);
-            if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
-            await ShowResult(loading.Id, "SpiderFoot", output);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
-    }
-
-    // ========== 11. Recon-ng (CLI) ==========
-    [SlashCommand("recon", "web reconnaissance (CLI tool)")]
+    [SlashCommand("recon", "web reconnaissance (CLI)")]
     public async Task Recon([Summary("domain")] string domain)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running Recon-ng on {domain} (may take 60s)...").Build());
-        try
-        {
-            var output = await RunCli("recon-ng", $"-w {domain}", 90);
-            if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
-            await ShowResult(loading.Id, "Recon-ng", output);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running Recon-ng on {domain}..."));
+        var output = await RunCli("recon-ng", $"-w {domain}", 90);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "recon", "Recon-ng", output, null);
     }
 
-    // ========== 12. Subfinder (CLI) ==========
-    [SlashCommand("subfinder", "enumerate subdomains (CLI tool)")]
+    [SlashCommand("subfinder", "enumerate subdomains (CLI)")]
     public async Task Subfinder([Summary("domain")] string domain)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running Subfinder on {domain}...").Build());
-        try
-        {
-            var output = await RunCli("subfinder", $"-d {domain} -silent", 45);
-            if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
-            await ShowResult(loading.Id, "Subfinder", output);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running Subfinder on {domain}..."));
+        var output = await RunCli("subfinder", $"-d {domain} -silent", 45);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "subfinder", "Subfinder", output, null);
     }
 
-    // ========== 13. AMASS (CLI) ==========
-    [SlashCommand("amass", "attack surface mapping (CLI tool)")]
+    [SlashCommand("amass", "attack surface mapping (CLI)")]
     public async Task Amass([Summary("domain")] string domain)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running AMASS on {domain} (may take 90s)...").Build());
-        try
-        {
-            var output = await RunCli("amass", $"-d {domain} -o /dev/stdout", 120);
-            if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
-            await ShowResult(loading.Id, "AMASS", output);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running AMASS on {domain}..."));
+        var output = await RunCli("amass", $"-d {domain} -o /dev/stdout", 120);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "amass", "AMASS", output, null);
     }
 
-    // ========== 14. TorBot (CLI) ==========
-    [SlashCommand("torbot", "crawl onion sites (CLI tool)")]
+    [SlashCommand("torbot", "crawl onion sites (CLI)")]
     public async Task TorBot([Summary("onion")] string onionUrl)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running TorBot on {onionUrl} (may take 60s)...").Build());
-        try
-        {
-            var output = await RunCli("torbot", $"-u http://{onionUrl}", 90);
-            if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
-            await ShowResult(loading.Id, "TorBot", output);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running TorBot on {onionUrl}..."));
+        var output = await RunCli("torbot", $"-u http://{onionUrl}", 90);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "torbot", "TorBot", output, null);
     }
 
-    // ========== 15. OD Crawler (CLI) ==========
-    [SlashCommand("odcrawler", "username disclosure (CLI tool)")]
+    [SlashCommand("odcrawler", "username disclosure (CLI)")]
     public async Task OdCrawler([Summary("username")] string username)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running OD Crawler on {username}...").Build());
-        try
-        {
-            var output = await RunCli("od-crawler", username, 60);
-            if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
-            await ShowResult(loading.Id, "OD Crawler", output);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running OD Crawler on {username}..."));
+        var output = await RunCli("od-crawler", username, 60);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "odcrawler", "OD Crawler", output, null);
     }
 
-    // ========== 16. WhoCord (CLI) ==========
-    [SlashCommand("whocord", "comprehensive username/email/Discord OSINT (CLI tool)")]
-    public async Task WhoCord(
-        [Summary("type", "username, email, or discord")] string type,
-        [Summary("target")] string target)
+    [SlashCommand("whocord", "comprehensive OSINT (CLI)")]
+    public async Task WhoCord([Summary("type", "username, email, or discord")] string type, [Summary("target")] string target)
     {
-        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         await DeferAsync();
-        string arg;
-        if (type.ToLower() == "username") arg = $"-u {target}";
-        else if (type.ToLower() == "email") arg = $"-e {target}";
-        else if (type.ToLower() == "discord") arg = $"-d {target}";
-        else { await FollowupAsync("Invalid type. Use username, email, or discord.", ephemeral: true); return; }
-        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running WhoCord on {target}...").Build());
-        try
+        string arg = type.ToLower() switch
         {
-            var output = await RunCli("whocord", arg, 60);
-            if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
-            await ShowResult(loading.Id, "WhoCord", output);
-        }
-        catch (Exception ex)
-        {
-            await loading.ModifyAsync(m => m.Embed = new EmbedBuilder().WithDescription($"Error: {ex.Message}").Build());
-        }
+            "username" => $"-u {target}",
+            "email" => $"-e {target}",
+            "discord" => $"-d {target}",
+            _ => throw new ArgumentException("Invalid type. Use username, email, or discord.")
+        };
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running WhoCord on {target}..."));
+        var output = await RunCli("whocord", arg, 60);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "whocord", "WhoCord", output, null);
+    }
+
+    [SlashCommand("sublist3r", "enumerate subdomains using OSINT (CLI)")]
+    public async Task Sublist3r([Summary("domain")] string domain)
+    {
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
+        await DeferAsync();
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running Sublist3r on {domain}..."));
+        var output = await RunCli("sublist3r", $"-d {domain} -t 10", 120);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "sublist3r", "Sublist3r", output, null);
+    }
+
+    [SlashCommand("whatweb", "fingerprint websites (CLI)")]
+    public async Task WhatWeb([Summary("target", "URL or IP")] string target)
+    {
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
+        await DeferAsync();
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running WhatWeb on {target}..."));
+        var output = await RunCli("whatweb", target, 60);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "whatweb", "WhatWeb", output, null);
+    }
+
+    [SlashCommand("dnsrecon", "DNS enumeration (CLI)")]
+    public async Task DnsRecon([Summary("domain")] string domain)
+    {
+        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
+        await DeferAsync();
+        var loading = await FollowupAsync(embed: _embed.CreateLoadingEmbed($"running DNSRecon on {domain}..."));
+        var output = await RunCli("dnsrecon", $"-d {domain} -t axfr,zonewalk,bing", 90);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "dnsrecon", "DNSRecon", output, null);
     }
 }

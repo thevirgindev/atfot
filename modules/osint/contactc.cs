@@ -20,6 +20,8 @@ public class ContactCmd : InteractionModuleBase<SocketInteractionContext>
     private readonly ExportService _export;
     private readonly IHttpClientFactory _httpFactory;
 
+    private static readonly Dictionary<ulong, (string summary, string? rawJson, string targetLookup)> _exportCache = new();
+
     public ContactCmd(
         KeyRedemptionService keyService,
         ApiKeyService apiKeyService,
@@ -43,101 +45,92 @@ public class ContactCmd : InteractionModuleBase<SocketInteractionContext>
 
     [SlashCommand("lookup", "query communication vectors across databases")]
     public async Task ContactLookup(
-        [Summary("vector", "target email address or phone number")] string vector,
-        [Summary("export", "export format (none, txt, json)")] string export = "none")
+        [Summary("vector", "target email address or phone number")] string vector)
     {
         if (!await EnsureAuthorized())
         {
-            await RespondAsync("🔒 You need to redeem a master key first using `/redeem`.", ephemeral: true);
+            await RespondAsync("[ERR] you need to redeem a master key first using `/redeem`.", ephemeral: true);
             return;
         }
         if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
         {
-            await RespondAsync($"⏳ Please wait {remaining.TotalSeconds:F0} seconds.", ephemeral: true);
+            await RespondAsync($"[WARN] please wait {remaining.TotalSeconds:F0} seconds.", ephemeral: true);
             return;
         }
         _cooldown.SetUsed(Context.User.Id.ToString());
 
         await DeferAsync();
 
-        var dto = new ScanResultDto
-        {
-            TargetLookup = vector,
-            ModuleSource = "communications_intelligence"
-        };
-
-        var links = new List<string>();
-        bool isEmail = vector.Contains('@');
         string encoded = Uri.EscapeDataString(vector);
+        bool isEmail = vector.Contains('@');
+
+        string dataSummary = $"**Vector:** `{vector}`\n\n";
+        string? rawJson = null;
 
         if (isEmail)
         {
-            links.Add($"[Hunter.io](https://hunter.io/try/search/{encoded})");
-            links.Add($"[EmailRep](https://emailrep.io/{encoded})");
-            links.Add($"[HaveIBeenPwned](https://haveibeenpwned.com/unifiedsearch/{encoded})");
-            links.Add($"[Epieos](https://epieos.com/?q={encoded})");
-            links.Add($"[Holehe (CLI)](https://github.com/megadose/holehe)");
+            dataSummary += "**Email Lookup Links:**\n" +
+                $"[Hunter.io](https://hunter.io/try/search/{encoded})\n" +
+                $"[HaveIBeenPwned](https://haveibeenpwned.com/unifiedsearch/{encoded})\n" +
+                $"[Epieos](https://epieos.com/?q={encoded})\n" +
+                $"[Holehe (CLI)](https://github.com/megadose/holehe)\n\n";
 
-            var emailRepKey = await _apiKeyService.GetApiKeyAsync(Context.User.Id.ToString(), "emailrep");
-            if (!string.IsNullOrEmpty(emailRepKey))
-            {
-                try
-                {
-                    var client = _httpFactory.CreateClient();
-                    client.DefaultRequestHeaders.Add("Key", emailRepKey);
-                    var response = await client.GetAsync($"https://emailrep.io/{encoded}");
-                    if (response.IsSuccessStatusCode)
-                    {
-                        var json = await response.Content.ReadAsStringAsync();
-                        dto.RawApiResponse = json;
-                        var obj = JObject.Parse(json);
-                        var reputation = obj["reputation"]?.ToString() ?? "unknown";
-                        dto.ExtractedData["emailrep_reputation"] = reputation;
-                        dto.Summary = $"EmailRep reputation: {reputation}. {obj["details"]?["num_delivered"]} emails delivered.";
-                    }
-                    else
-                    {
-                        dto.ExtractedData["emailrep_error"] = $"HTTP {response.StatusCode}";
-                    }
-                }
-                catch (Exception ex)
-                {
-                    dto.ExtractedData["emailrep_exception"] = ex.Message;
-                }
-            }
-            else
-            {
-                dto.ExtractedData["emailrep"] = "No API key. Use /setapikey emailrep <key> to enable automated checks.";
-            }
+            dataSummary += $"[info] for comprehensive intelligence, run:\n" +
+                $"  • `/osint sf {vector}` — SpiderFoot (breaches, reputation, Shodan, VT, etc.)\n" +
+                $"  • `/osint pdl {vector}` — PeopleDataLabs person enrichment (requires API key)\n\n";
         }
         else
         {
-            links.Add($"[Truecaller](https://www.truecaller.com/search/global/{encoded})");
-            links.Add($"[PhoneInfoga](https://github.com/sundowndev/PhoneInfoga) (CLI tool)");
-            links.Add($"[Numverify](https://numverify.com/) (API)");
-            links.Add($"[SpyDialer](http://spydialer.com/)");
+            dataSummary += "**Phone Lookup Links:**\n" +
+                $"[PhoneInfoga](https://github.com/sundowndev/PhoneInfoga) (CLI tool)\n" +
+                $"[Numverify](https://numverify.com/) (API — requires key)\n" +
+                $"[SpyDialer](http://spydialer.com/)\n\n";
 
-            var truecallerKey = await _apiKeyService.GetApiKeyAsync(Context.User.Id.ToString(), "truecaller");
-            if (!string.IsNullOrEmpty(truecallerKey))
-            {
-                dto.ExtractedData["truecaller"] = "API key present, but manual link recommended due to restrictions.";
-            }
-            else
-            {
-                dto.ExtractedData["truecaller"] = "No API key. Use link for manual lookup.";
-            }
+            dataSummary += $"[info] for phone intelligence, run:\n" +
+                $"  • `/osint sf {vector}` — SpiderFoot comprehensive scan\n" +
+                $"  • `/osint phoneinfoga {vector}` — PhoneInfoga CLI (Docker only)\n";
         }
 
-        dto.DeepLinks = links;
+        var embed = _embed.CreateMonochromeEmbed("contact intelligence", dataSummary, "gray");
+        var msg = await FollowupAsync(embed: embed);
 
-        var description = $"**Vector:** `{vector}`\n\n**Investigation Links:**\n{string.Join("\n", links)}";
-        var embed = _embed.CreateMonochromeEmbed("contact intelligence", description, "gray");
+        _exportCache[msg.Id] = (dataSummary, rawJson, vector);
 
-        if (export.ToLower() == "json")
-            await FollowupWithFileAsync(_export.BuildJsonStream(dto), "contact.json", embed: embed);
-        else if (export.ToLower() == "txt")
-            await FollowupWithFileAsync(_export.BuildTextStream(dto), "contact.txt", embed: embed);
-        else
-            await FollowupAsync(embed: embed);
+        var hasJson = !string.IsNullOrEmpty(rawJson);
+        var components = new ComponentBuilder()
+            .WithButton("TXT", $"contact_export:{msg.Id}:txt", ButtonStyle.Secondary)
+            .WithButton("JSON", $"contact_export:{msg.Id}:json", ButtonStyle.Secondary, disabled: !hasJson);
+        await msg.ModifyAsync(m => m.Components = components.Build());
+    }
+
+    [ComponentInteraction("contact_export:*:*", ignoreGroupNames: true)]
+    public async Task HandleContactExport(string msgIdStr, string format)
+    {
+        await DeferAsync(ephemeral: true);
+        if (!ulong.TryParse(msgIdStr, out var msgId) || !_exportCache.TryGetValue(msgId, out var data))
+        {
+            await FollowupAsync("Export data expired or not found. Run the command again.", ephemeral: true);
+            return;
+        }
+
+        if (format == "json" && string.IsNullOrEmpty(data.rawJson))
+        {
+            await FollowupAsync("No raw JSON data to export.", ephemeral: true);
+            return;
+        }
+
+        var dto = new ScanResultDto
+        {
+            TargetLookup = data.targetLookup,
+            ModuleSource = "communications_intelligence",
+            RawApiResponse = data.rawJson,
+            Summary = data.summary
+        };
+
+        string filename = $"contact_{data.targetLookup.Replace(" ", "_").Replace("@", "_at_")}_{DateTime.Now:yyyyMMddHHmmss}";
+        using var stream = format == "json"
+            ? _export.BuildJsonStream(dto)
+            : _export.BuildTextStream(dto);
+        await FollowupWithFileAsync(stream, $"{filename}.{format}", $"Exported contact intelligence data.");
     }
 }

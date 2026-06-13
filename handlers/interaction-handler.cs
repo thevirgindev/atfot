@@ -24,7 +24,8 @@ public class InteractionHandler
     public async Task InitializeAsync()
     {
         await _interactions.AddModulesAsync(Assembly.GetExecutingAssembly(), _services);
-        
+        Log.Information("All modules loaded successfully.");
+
         _client.Ready += async () =>
         {
             await _interactions.RegisterCommandsGloballyAsync(true);

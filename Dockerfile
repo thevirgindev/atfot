@@ -1,4 +1,3 @@
-# BUILD STAGE
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
@@ -12,17 +11,33 @@ RUN dotnet publish -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
 WORKDIR /app
 
-# Install Python, pip, git, go, and other dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     python3 python3-pip git golang curl \
+    whatweb dnsrecon \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python CLI tools
-RUN pip3 install --no-cache-dir sherlock-project theHarvester spiderfoot recon-ng torbot od-crawler whocord
+# Install SpiderFoot (GitHub clone, not PyPI)
+RUN git clone https://github.com/smicallef/spiderfoot.git /opt/spiderfoot \
+    && cd /opt/spiderfoot \
+    && pip3 install --break-system-packages --no-cache-dir -r requirements.txt \
+    && ln -sf /opt/spiderfoot/sf.py /usr/local/bin/sf
 
-# Install Go tools
+# Install recon-ng (GitHub clone, not PyPI)
+RUN git clone https://github.com/lanmaster53/recon-ng.git /opt/recon-ng \
+    && cd /opt/recon-ng \
+    && pip3 install --break-system-packages --no-cache-dir -r REQUIREMENTS \
+    && ln -sf /opt/recon-ng/recon-ng /usr/local/bin/recon-ng
+
+# Install other Python CLI tools that ARE on PyPI
+RUN pip3 install --break-system-packages --no-cache-dir \
+    sherlock-project theHarvester torbot od-crawler whocord holehe sublist3r
+
+# Install Go tools (subfinder, amass, waybackurls, gau)
 RUN go install -v github.com/subfinder/subfinder/v2/cmd/subfinder@latest && \
-    go install -v github.com/owasp-amass/amass/v4/...@master
+    go install -v github.com/owasp-amass/amass/v4/...@master && \
+    go install -v github.com/tomnomnom/waybackurls@latest && \
+    go install -v github.com/lc/gau/v2/cmd/gau@latest
 
 ENV PATH="/root/go/bin:${PATH}"
 
@@ -30,9 +45,5 @@ ENV PATH="/root/go/bin:${PATH}"
 COPY --from=build /app/publish /app
 
 RUN mkdir -p /app/resources /app/logs
-
-RUN pip3 install --no-cache-dir holehe
-RUN go install -v github.com/tomnomnom/waybackurls@latest
-RUN go install -v github.com/lc/gau/v2/cmd/gau@latest
 
 ENTRYPOINT ["dotnet", "atfot.dll"]

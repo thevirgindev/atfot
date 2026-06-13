@@ -41,12 +41,12 @@ public class DataCmd : InteractionModuleBase<SocketInteractionContext>
     {
         if (!await EnsureAuthorized())
         {
-            await RespondAsync("🔒 You need to redeem a master key first.", ephemeral: true);
+            await RespondAsync("[ERR] you need to redeem a master key first.", ephemeral: true);
             return;
         }
         if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
         {
-            await RespondAsync($"⏳ Please wait {remaining.TotalSeconds:F0} seconds.", ephemeral: true);
+            await RespondAsync($"[WARN] please wait {remaining.TotalSeconds:F0} seconds.", ephemeral: true);
             return;
         }
         _cooldown.SetUsed(Context.User.Id.ToString());
