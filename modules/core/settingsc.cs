@@ -35,38 +35,37 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
         _cd.SetUsed(Context.User.Id.ToString());
 
         var s = await _settings.GetUserSettingsAsync(Context.User.Id.ToString());
-        var prompt = string.IsNullOrEmpty(s.ChatSystemPrompt) ? "(default)" : s.ChatSystemPrompt.Length > 40 ? s.ChatSystemPrompt[..40] + "..." : s.ChatSystemPrompt;
+        var prompt = string.IsNullOrEmpty(s.SystemPrompt) ? "(default)" : s.SystemPrompt.Length > 40 ? s.SystemPrompt[..40] + "..." : s.SystemPrompt;
         var emb = _emb.CreateMonochromeEmbed("user settings",
             $"```\n" +
             $"╔══════════════════════════════════════════╗\n" +
             $"║ Theme             : {s.Theme,-26} ║\n" +
             $"║ Notifications     : {s.Notifications,-26} ║\n" +
             $"║ AI Summary        : {(s.AiSummaryEnabled ? "on" : "off"),-26} ║\n" +
-            $"║ AI Chat Prompt    : {prompt,-26} ║\n" +
-            $"║ Loading Style     : {s.LoadingStyle,-26} ║\n" +
-            $"║ Auto Collapse     : {(s.AutoCollapse ? "on" : "off"),-26} ║\n" +
+            $"║ AI Chat           : {(s.AiChatEnabled ? "on" : "off"),-26} ║\n" +
+            $"║ System Prompt     : {prompt,-26} ║\n" +
             $"║ Updated           : {s.UpdatedAt,-26} ║\n" +
             $"╚══════════════════════════════════════════╝\n```", s.Theme);
         await RespondAsync(embed: emb);
     }
 
-    [SlashCommand("set", "update a setting")]
+    [SlashCommand("set", "update a setting (use: theme dark/gray/white | notifications silent/public | ai_summary on/off | ai_chat true/false | system_prompt <text>)")]
     public async Task Set(
-        [Summary("key", "theme, notifications, ai_summary, ai_chat_system_prompt, loading_style, auto_collapse")] string key,
-        [Summary("value", "new value")] string value)
+        [Summary("key", "theme, notifications, ai_summary, ai_chat, system_prompt")] string key,
+        [Summary("value", "theme: dark/gray/white · notifications: silent/public · ai_summary: on/off · ai_chat: true/false · system_prompt: any text")] string value)
     {
         if (!await isAuthed()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         if (_cd.IsOnCooldown(Context.User.Id.ToString(), out var rem))
         {
-            await RespondAsync($"[WARN] wait {rem.TotalSeconds:F0}s.", ephemeral: true);
+            await RespondAsync($"[WARN] wait a bit.", ephemeral: true);
             return;
         }
         _cd.SetUsed(Context.User.Id.ToString());
 
-        var validKeys = new[] { "theme", "notifications", "ai_summary", "ai_chat_system_prompt", "loading_style", "auto_collapse" };
-        if (key.ToLower() == "ai_chat_system_prompt")
+        var validKeys = new[] { "theme", "notifications", "ai_summary", "ai_chat", "system_prompt" };
+        if (key.ToLower() == "system_prompt")
         {
-            // special handling for prompt — allow spaces, joined from value param
+            // special handling for prompt — allow spaces
         }
         else if (!validKeys.Contains(key.ToLower()))
         {
@@ -86,10 +85,16 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
             await RespondAsync("[ERR] notifications must be silent or public.", ephemeral: true);
             return;
         }
-        // validate loading_style
-        if (key.ToLower() == "loading_style" && !new[] { "minimal", "verbose" }.Contains(value.ToLower()))
+        // validate ai_summary
+        if (key.ToLower() == "ai_summary" && !new[] { "on", "off" }.Contains(value.ToLower()))
         {
-            await RespondAsync("[ERR] loading_style must be minimal or verbose.", ephemeral: true);
+            await RespondAsync("[ERR] ai_summary must be on or off.", ephemeral: true);
+            return;
+        }
+        // validate ai_chat
+        if (key.ToLower() == "ai_chat" && !new[] { "true", "false" }.Contains(value.ToLower()))
+        {
+            await RespondAsync("[ERR] ai_chat must be true or false.", ephemeral: true);
             return;
         }
 
