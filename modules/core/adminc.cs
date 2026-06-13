@@ -52,7 +52,7 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
     {
         if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
         {
-            await RespondAsync($"[WAIT] Wait {remaining.TotalSeconds:F0} seconds.", ephemeral: true);
+            await RespondAsync("[WAIT] wait a bit.", ephemeral: true);
             return;
         }
         _cooldown.SetUsed(Context.User.Id.ToString());
@@ -143,9 +143,9 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
         [Summary("type", "default or other")] string type = "default",
         [Summary("quota", "daily request limit (-1 unlimited)")] int quota = -1)
     {
-        if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
+        if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var _))
         {
-            await RespondAsync($"[WAIT] Wait {remaining.TotalSeconds:F0} seconds.", ephemeral: true);
+            await RespondAsync("[WAIT] wait a bit.", ephemeral: true);
             return;
         }
         _cooldown.SetUsed(Context.User.Id.ToString());
@@ -164,9 +164,9 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
     [SlashCommand("removeapikey", "remove an API key by ID")]
     public async Task RemoveApiKey([Summary("service")] string service, [Summary("keyid")] int keyId)
     {
-        if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
+        if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var _))
         {
-            await RespondAsync($"[WAIT] Wait {remaining.TotalSeconds:F0} seconds.", ephemeral: true);
+            await RespondAsync("[WAIT] wait a bit.", ephemeral: true);
             return;
         }
         _cooldown.SetUsed(Context.User.Id.ToString());
@@ -337,7 +337,7 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
     // ========== STATUS ==========
     [SlashCommand("status", "change bot presence (owner only)")]
     [RequireOwner]
-    public async Task SetStatus([Summary("status")] string status = "idle", [Summary("activity")] string activity = "ATFOT – All The Fucking OSINT Tools | /help")
+    public async Task SetStatus([Summary("status")] string status = "online", [Summary("activity")] string activity = "ATFOT – OSINT Tools | /guide")
     {
         var presenceStatus = status.ToLower() switch
         {
@@ -346,11 +346,24 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
             "invisible" => UserStatus.Invisible,
             _ => UserStatus.Online
         };
-        var client = Context.Client as DiscordSocketClient;
-        if (client != null)
+        try
         {
-            await client.SetStatusAsync(presenceStatus);
-            await client.SetGameAsync(activity);
+            var client = Context.Client as DiscordSocketClient;
+            if (client != null)
+            {
+                await client.SetStatusAsync(presenceStatus);
+                await client.SetGameAsync(activity);
+            }
+            else
+            {
+                await RespondAsync("[ERR] bot client not available for status change.", ephemeral: true);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            await RespondAsync($"[ERR] failed to set status: {ex.Message}", ephemeral: true);
+            return;
         }
         var embed = _embed.CreateMonochromeEmbed("bot status", $"Status: {presenceStatus}\nActivity: {activity}", "white");
         await RespondAsync(embed: embed, ephemeral: true);
