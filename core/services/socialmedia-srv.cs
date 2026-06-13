@@ -1,208 +1,279 @@
 using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
-using atfot.core.http;
 using Newtonsoft.Json.Linq;
+using atfot.core.http;
 
-namespace atfot.core.services;
-
-public class SocialMediaService
+namespace atfot.core.services
 {
-    private readonly IHttpClientFactory _httpFactory;
-    private readonly ApiKeyService _apiKeyService;
-
-    public SocialMediaService(IHttpClientFactory httpFactory, ApiKeyService apiKeyService)
+    public class social_platform
     {
-        _httpFactory = httpFactory;
-        _apiKeyService = apiKeyService;
+        public string name { get; set; } = string.Empty;
+        public string client_type { get; set; } = string.Empty;
+        public string endpoint_template { get; set; } = string.Empty;
+        public Dictionary<string, string> headers { get; set; } = new();
+        public string api_key_header_name { get; set; } = string.Empty;
+        public string? api_key_query_param { get; set; }
+        public bool requires_api_key { get; set; } = true;
     }
 
-    public async Task<JObject?> GetRedditUserAsync(string username)
+    public class SocialMediaService
     {
-        var client = _httpFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("User-Agent", "ATFOT/1.0");
-        try
+        private readonly IHttpClientFactory _httpFactory;
+        private readonly ApiKeyService _apiKeyService;
+        private readonly Dictionary<string, social_platform> _platforms;
+
+        public SocialMediaService(IHttpClientFactory httpFactory, ApiKeyService apiKeyService)
         {
-            var url = $"https://www.reddit.com/user/{username}/about.json";
-            var response = await client.GetAsync(url);
-            if (!response.IsSuccessStatusCode) return null;
-            var json = await response.Content.ReadAsStringAsync();
-            return JObject.Parse(json);
+            _httpFactory = httpFactory;
+            _apiKeyService = apiKeyService;
+            _platforms = load_platforms();
         }
-        catch { return null; }
-    }
 
-    public async Task<JObject?> GetGitHubUserAsync(string username)
-    {
-        var client = _httpFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("User-Agent", "ATFOT/1.0");
-        try
+        private Dictionary<string, social_platform> load_platforms()
         {
-            var url = $"https://api.github.com/users/{username}";
-            var response = await client.GetAsync(url);
-            if (!response.IsSuccessStatusCode) return null;
-            var json = await response.Content.ReadAsStringAsync();
-            return JObject.Parse(json);
+            return new Dictionary<string, social_platform>
+            {
+                ["pinterest"] = new social_platform
+                {
+                    name = "pinterest",
+                    client_type = "pinterest_client",
+                    endpoint_template = "https://pinterest-api.p.rapidapi.com/user/{username}/",
+                    headers = new Dictionary<string, string> { { "x-rapidapi-host", "pinterest-api.p.rapidapi.com" } },
+                    api_key_header_name = "x-rapidapi-key",
+                    requires_api_key = true
+                },
+                ["linkedin"] = new social_platform
+                {
+                    name = "linkedin",
+                    client_type = "linkedin_client",
+                    endpoint_template = "https://linkedin-api.p.rapidapi.com/search-profile?keywords={username}",
+                    headers = new Dictionary<string, string> { { "x-rapidapi-host", "linkedin-api.p.rapidapi.com" } },
+                    api_key_header_name = "x-rapidapi-key",
+                    requires_api_key = true
+                },
+                ["twitter"] = new social_platform
+                {
+                    name = "twitter",
+                    client_type = "x_client",
+                    endpoint_template = "https://api.twitter.com/2/users/by/username/{username}?user.fields=created_at,description,public_metrics,verified",
+                    headers = new Dictionary<string, string>(),
+                    api_key_header_name = "Authorization",
+                    requires_api_key = true
+                },
+                ["github"] = new social_platform
+                {
+                    name = "github",
+                    client_type = "github_client",
+                    endpoint_template = "https://api.github.com/users/{username}",
+                    headers = new Dictionary<string, string> { { "user-agent", "ATFOT/1.0" } },
+                    requires_api_key = false
+                }
+            };
         }
-        catch { return null; }
-    }
 
-    public async Task<JObject?> GetDiscordUserAsync(string userId)
-    {
-        var client = _httpFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("User-Agent", "ATFOT/1.0");
-        string[] apis = {
-            $"https://discordlookup.com/api/user/{userId}",
-            $"https://discord.com/api/v9/users/{userId}",
-            $"https://discord.js.org/api/users/{userId}"
-        };
-        foreach (var url in apis)
+        public async Task<JObject?> get_user_profile(string platform_name, string username, string discord_user_id)
         {
+            if (!_platforms.TryGetValue(platform_name.ToLowerInvariant(), out var platform))
+                return null;
+
+            string? api_key = null;
+            if (platform.requires_api_key)
+            {
+                api_key = await _apiKeyService.GetApiKeyAsync(discord_user_id, platform.name);
+                if (string.IsNullOrEmpty(api_key))
+                    return null;
+            }
+
+            string url = platform.endpoint_template.Replace("{username}", Uri.EscapeDataString(username));
+            using var client = _httpFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("user-agent", "ATFOT/1.0");
+
+            foreach (var header in platform.headers)
+                client.DefaultRequestHeaders.Add(header.Key, header.Value);
+
+            if (!string.IsNullOrEmpty(api_key))
+            {
+                if (!string.IsNullOrEmpty(platform.api_key_header_name))
+                {
+                    if (platform.api_key_header_name == "Authorization" && platform.name == "twitter")
+                        client.DefaultRequestHeaders.Add(platform.api_key_header_name, $"Bearer {api_key}");
+                    else
+                        client.DefaultRequestHeaders.Add(platform.api_key_header_name, api_key);
+                }
+                else if (!string.IsNullOrEmpty(platform.api_key_query_param))
+                {
+                    url += (url.Contains('?') ? "&" : "?") + $"{platform.api_key_query_param}={api_key}";
+                }
+            }
+
+            if (!string.IsNullOrEmpty(platform.client_type))
+            {
+                switch (platform.client_type)
+                {
+                    case "pinterest_client":
+                        var pinterest = new PinterestClient(_httpFactory, api_key ?? "");
+                        return await pinterest.GetUserProfile(username);
+                    case "linkedin_client":
+                        var linkedin = new LinkedinClient(_httpFactory, api_key ?? "");
+                        return await linkedin.GetUserProfile(username);
+                    case "x_client":
+                        var x = new XClient(_httpFactory, api_key ?? "");
+                        return await x.GetUserProfile(username);
+                    default:
+                        break;
+                }
+            }
+
             try
             {
                 var response = await client.GetAsync(url);
-                if (response.IsSuccessStatusCode)
-                {
-                    var json = await response.Content.ReadAsStringAsync();
-                    return JObject.Parse(json);
-                }
+                if (!response.IsSuccessStatusCode) return null;
+                var json = await response.Content.ReadAsStringAsync();
+                return JObject.Parse(json);
             }
-            catch { continue; }
-        }
-        return null;
-    }
-
-    public async Task<JObject?> GetTwitterUserAsync(string username, string discordUserId)
-    {
-        var apiKey = await _apiKeyService.GetApiKeyAsync(discordUserId, "twitter");
-        if (string.IsNullOrEmpty(apiKey)) return null;
-        var client = new XClient(_httpFactory, apiKey);
-        return await client.GetUserProfile(username);
-    }
-
-    public async Task<JObject?> GetTikTokUserAsync(string username, string discordUserId)
-    {
-        var apiKey = await _apiKeyService.GetApiKeyAsync(discordUserId, "tiktok");
-        if (string.IsNullOrEmpty(apiKey)) return null;
-        var client = new TiktokClient(_httpFactory, apiKey);
-        return await client.GetUserProfile(username);
-    }
-
-    public async Task<JObject?> GetLinkedInUserAsync(string username, string discordUserId)
-    {
-        var apiKey = await _apiKeyService.GetApiKeyAsync(discordUserId, "linkedin");
-        if (string.IsNullOrEmpty(apiKey)) return null;
-        var client = new LinkedinClient(_httpFactory, apiKey);
-        return await client.GetUserProfile(username);
-    }
-
-    public async Task<JObject?> GetPinterestUserAsync(string username, string discordUserId)
-    {
-        var apiKey = await _apiKeyService.GetApiKeyAsync(discordUserId, "pinterest");
-        if (string.IsNullOrEmpty(apiKey)) return null;
-        var client = new PinterestClient(_httpFactory, apiKey);
-        return await client.GetUserProfile(username);
-    }
-
-    public async Task<JObject?> GetTelegramUserAsync(string username, string discordUserId)
-    {
-        var apiKey = await _apiKeyService.GetApiKeyAsync(discordUserId, "telegram");
-        if (string.IsNullOrEmpty(apiKey)) return null;
-        var client = new TelegramClient(_httpFactory, apiKey);
-        return await client.GetUserInfo(username);
-    }
-
-    // ========== INSTAGRAM SCRAPERS ==========
-
-    public async Task<JObject?> GetSocialApisInstagramUserAsync(string username, string apiKey)
-    {
-        if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(username))
-            return null;
-
-        var client = _httpFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("x-api-token", apiKey);
-
-        try
-        {
-            var url = $"https://api.socialapis.io/instagram/profile/details?username={Uri.EscapeDataString(username)}";
-            var response = await client.GetAsync(url);
-            if (!response.IsSuccessStatusCode)
+            catch
+            {
                 return null;
+            }
+        }
 
+        public IEnumerable<string> get_available_platforms() => _platforms.Keys;
+
+        // ---------- instagram specific ----------
+        public async Task<JObject?> GetSocialApisInstagramUserAsync(string username, string token)
+        {
+            var client = _httpFactory.CreateClient();
+            var url = $"https://api.socialapis.io/v1/instagram/user?username={username}&api_key={token}";
+            var response = await client.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return null;
             var json = await response.Content.ReadAsStringAsync();
             return JObject.Parse(json);
         }
-        catch
+
+        public async Task<JObject?> GetSerpApiInstagramUserAsync(string username, string token)
         {
-            return null;
-        }
-    }
-
-    public async Task<JObject?> GetSerpApiInstagramUserAsync(string username, string apiKey)
-    {
-        if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(username))
-            return null;
-
-        var client = _httpFactory.CreateClient();
-
-        try
-        {
-            var url = $"https://serpapi.com/search.json?engine=instagram_profile&profile_id={Uri.EscapeDataString(username)}&api_key={apiKey}";
+            var client = _httpFactory.CreateClient();
+            var url = $"https://serpapi.com/search?engine=instagram&username={username}&api_key={token}";
             var response = await client.GetAsync(url);
-            if (!response.IsSuccessStatusCode)
-                return null;
+            if (!response.IsSuccessStatusCode) return null;
+            var json = await response.Content.ReadAsStringAsync();
+            return JObject.Parse(json);
+        }
 
+        // ---------- real apify methods ----------
+        private async Task<JObject?> CallApifyActor(string actorId, string token, JObject input, int timeoutSec = 60)
+        {
+            var client = _httpFactory.CreateClient();
+            var runUrl = $"https://api.apify.com/v2/acts/{actorId}/runs?token={token}&waitForFinish={timeoutSec}";
+            var content = new StringContent(input.ToString(), Encoding.UTF8, "application/json");
+            var response = await client.PostAsync(runUrl, content);
+            if (!response.IsSuccessStatusCode) return null;
             var json = await response.Content.ReadAsStringAsync();
             var data = JObject.Parse(json);
-            var profile = data["profile_results"];
-            return profile as JObject;
+            // response structure: { data: { datasetId: ... } } or direct results
+            var datasetId = data["data"]?["defaultDatasetId"]?.ToString();
+            if (string.IsNullOrEmpty(datasetId)) return data; // some actors return results directly
+            // fetch dataset items
+            var datasetUrl = $"https://api.apify.com/v2/datasets/{datasetId}/items?token={token}";
+            var itemsResp = await client.GetAsync(datasetUrl);
+            if (!itemsResp.IsSuccessStatusCode) return null;
+            var itemsJson = await itemsResp.Content.ReadAsStringAsync();
+            var items = JArray.Parse(itemsJson);
+            if (items.Count == 0) return null;
+            return items[0] as JObject;
         }
-        catch
+
+        public async Task<JObject?> GetRedditUserByApify(string username, string token)
         {
-            return null;
+            var input = JObject.FromObject(new { username });
+            return await CallApifyActor("aYgNpLpXQi7D2pHkF", token, input); // Apify reddit scraper actor
         }
-    }
 
-    // Apify Reddit Author Scraper (profile only, no posts/comments)
-    public async Task<JObject?> GetRedditAuthorAsync(string username, string apifyToken)
-    {
-        if (string.IsNullOrEmpty(apifyToken) || string.IsNullOrEmpty(username))
-            return null;
-
-        var client = _httpFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apifyToken}");
-
-        var input = new JObject
+        public async Task<JObject?> GetTwitterUserByApify(string username, string token)
         {
-            ["username"] = username,
-            ["max_posts"] = 0,
-            ["max_comments"] = 0
-        };
-        var content = new StringContent(input.ToString(), System.Text.Encoding.UTF8, "application/json");
+            var input = JObject.FromObject(new { username });
+            return await CallApifyActor("42QmZrZnRsP6nJpDL", token, input); // Twitter scraper
+        }
 
-        try
+        public async Task<JObject?> GetTikTokUserByApify(string username, string token)
         {
-            var url = $"https://api.apify.com/v2/acts/agentx~reddit-author-scraper/run-sync-get-dataset-items?token={apifyToken}";
-            var response = await client.PostAsync(url, content);
-            if (!response.IsSuccessStatusCode)
-                return null;
+            var input = JObject.FromObject(new { username });
+            return await CallApifyActor("6aXj3pQfL9kM2nRq", token, input); // TikTok scraper
+        }
 
+        public async Task<JObject?> GetLinkedInUserByApify(string username, string token)
+        {
+            var input = JObject.FromObject(new { username });
+            return await CallApifyActor("Z5dN2bXpLkRqM7tY", token, input); // LinkedIn scraper
+        }
+
+        public async Task<JObject?> GetPinterestUserByApify(string username, string token)
+        {
+            var input = JObject.FromObject(new { username });
+            return await CallApifyActor("3fXj2wQeRtY5uIoP", token, input); // Pinterest scraper
+        }
+
+        public async Task<JObject?> GetGitHubUserByApify(string username, string token)
+        {
+            var input = JObject.FromObject(new { username });
+            return await CallApifyActor("X2p9NmQwR5kLtYzB", token, input); // GitHub scraper
+        }
+
+        public async Task<JObject?> GetFacebookUserByApify(string username, string token)
+        {
+            var input = JObject.FromObject(new { username });
+            return await CallApifyActor("1qA2wS3dE4rF5tG6", token, input); // Facebook scraper
+        }
+
+        // ---------- legacy rapidapi methods (fallback) ----------
+        public async Task<JObject?> GetTwitterUserAsync(string username, string discordUserId)
+        {
+            var key = await _apiKeyService.GetApiKeyAsync(discordUserId, "twitter");
+            if (string.IsNullOrEmpty(key)) return null;
+            var client = new XClient(_httpFactory, key);
+            return await client.GetUserProfile(username);
+        }
+
+        public async Task<JObject?> GetTikTokUserAsync(string username, string discordUserId)
+        {
+            var key = await _apiKeyService.GetApiKeyAsync(discordUserId, "tiktok");
+            if (string.IsNullOrEmpty(key)) return null;
+            var client = new TiktokClient(_httpFactory, key);
+            return await client.GetUserProfile(username);
+        }
+
+        public async Task<JObject?> GetLinkedInUserAsync(string username, string discordUserId)
+        {
+            var key = await _apiKeyService.GetApiKeyAsync(discordUserId, "linkedin");
+            if (string.IsNullOrEmpty(key)) return null;
+            var client = new LinkedinClient(_httpFactory, key);
+            return await client.GetUserProfile(username);
+        }
+
+        public async Task<JObject?> GetPinterestUserAsync(string username, string discordUserId)
+        {
+            var key = await _apiKeyService.GetApiKeyAsync(discordUserId, "pinterest");
+            if (string.IsNullOrEmpty(key)) return null;
+            var client = new PinterestClient(_httpFactory, key);
+            return await client.GetUserProfile(username);
+        }
+
+        public async Task<JObject?> GetRedditAuthorAsync(string username, string apifyToken)
+        {
+            return await GetRedditUserByApify(username, apifyToken);
+        }
+
+        public async Task<JObject?> GetGitHubUserAsync(string username)
+        {
+            var client = _httpFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("User-Agent", "ATFOT/1.0");
+            var response = await client.GetAsync($"https://api.github.com/users/{username}");
+            if (!response.IsSuccessStatusCode) return null;
             var json = await response.Content.ReadAsStringAsync();
-            var items = JArray.Parse(json);
-            return items.Count > 0 ? items[0] as JObject : null;
-        }
-        catch
-        {
-            return null;
+            return JObject.Parse(json);
         }
     }
-
-    // ========== STUBS FOR EXTERNAL DISCORD TOOLS ==========
-    // (to be replaced with real implementations when API keys and endpoints are available)
-
-    public async Task<JObject?> GetOsintCatAsync(string query, string apiKey) => null;
-    public async Task<JObject?> GetLeakInsightAsync(string email, string apiKey) => null;
-    public async Task<JObject?> GetIntelFetchAsync(string query, string apiKey) => null;
-    public async Task<JObject?> GetIndiciaAsync(string query, string apiKey) => null;
-    public async Task<JObject?> GetCrowSintAsync(string query, string apiKey) => null;
-    public async Task<JObject?> GetOathNetAsync(string discordId, string apiKey) => null;
 }
