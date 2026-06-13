@@ -41,9 +41,16 @@ RUN git clone https://github.com/soxoj/maigret.git /opt/maigret \
     && pip3 install --break-system-packages --no-cache-dir -r requirements.txt \
     && ln -sf /opt/maigret/maigret.py /usr/local/bin/maigret
 
+# Install theHarvester (email/subdomain OSINT, GitHub clone)
+RUN git clone https://github.com/laramies/theHarvester.git /opt/theharvester \
+    && cd /opt/theharvester \
+    && pip3 install --break-system-packages --no-cache-dir -r requirements.txt \
+    && python3 setup.py install \
+    && ln -sf /opt/theharvester/theHarvester.py /usr/local/bin/theHarvester
+
 # Install other Python CLI tools that ARE on PyPI
 RUN pip3 install --break-system-packages --no-cache-dir \
-    sherlock-project theharvester torbot whocord holehe sublist3r
+    sherlock-project torbot whocord holehe sublist3r
 
 # Install Go tools (subfinder, amass, waybackurls, gau)
 RUN go install -v github.com/subfinder/subfinder/v2/cmd/subfinder@latest && \
