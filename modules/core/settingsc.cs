@@ -35,7 +35,6 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
         _cd.SetUsed(Context.User.Id.ToString());
 
         var s = await _settings.GetUserSettingsAsync(Context.User.Id.ToString());
-        var prompt = string.IsNullOrEmpty(s.SystemPrompt) ? "(default)" : s.SystemPrompt.Length > 40 ? s.SystemPrompt[..40] + "..." : s.SystemPrompt;
         var assp = string.IsNullOrEmpty(s.AiSummarySystemPrompt) ? "(default)" : s.AiSummarySystemPrompt.Length > 30 ? s.AiSummarySystemPrompt[..30] + "..." : s.AiSummarySystemPrompt;
         var acsp = string.IsNullOrEmpty(s.AiChatSystemPrompt) ? "(default)" : s.AiChatSystemPrompt.Length > 30 ? s.AiChatSystemPrompt[..30] + "..." : s.AiChatSystemPrompt;
         var emb = _emb.CreateMonochromeEmbed("user settings",
@@ -44,19 +43,18 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
             $"║ Theme             : {s.Theme,-26} ║\n" +
             $"║ Notifications     : {s.Notifications,-26} ║\n" +
             $"║ AI Summary        : {(s.AiSummaryEnabled ? "on" : "off"),-26} ║\n" +
-            $"║ AI Chat           : {(s.AiChatEnabled ? "on" : "off"),-26} ║\n" +
-            $"║ System Prompt     : {prompt,-26} ║\n" +
-            $"║ AI Summary Prompt : {assp,-26} ║\n" +
+                    $"║ AI Chat           : {(s.AiChatEnabled ? "on" : "off"),-26} ║\n" +
+                    $"║ AI Summary Prompt : {assp,-26} ║\n" +
             $"║ AI Chat Prompt    : {acsp,-26} ║\n" +
             $"║ Updated           : {s.UpdatedAt,-26} ║\n" +
             $"╚══════════════════════════════════════════╝\n```", s.Theme);
         await RespondAsync(embed: emb);
     }
 
-    [SlashCommand("set", "update theme | notifications | ai_summary | ai_chat | system_prompt")]
+    [SlashCommand("set", "update theme | notifications | ai_summary | ai_chat")]
     public async Task Set(
-        [Summary("key", "theme, notifications, ai_summary, ai_chat, system_prompt")] string key,
-        [Summary("value", "theme | notifications | ai_summary | ai_chat | system_prompt (see guide)")] string value)
+        [Summary("key", "theme, notifications, ai_summary, ai_chat, assp, acsp")] string key,
+        [Summary("value", "theme | notifications | ai_summary | ai_chat (see guide)")] string value)
     {
         if (!await isAuthed()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         if (_cd.IsOnCooldown(Context.User.Id.ToString(), out var rem))
@@ -66,8 +64,8 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
         }
         _cd.SetUsed(Context.User.Id.ToString());
 
-        var validKeys = new[] { "theme", "notifications", "ai_summary", "ai_chat", "system_prompt", "assp", "acsp" };
-        if (key.ToLower() == "system_prompt" || key.ToLower() == "assp" || key.ToLower() == "acsp")
+        var validKeys = new[] { "theme", "notifications", "ai_summary", "ai_chat", "assp", "acsp" };
+        if (key.ToLower() == "assp" || key.ToLower() == "acsp")
         {
             // special handling for prompts — allow spaces
         }
