@@ -441,24 +441,31 @@ The database (`atfot-data` volume) persists between updates. All user keys, sett
 ## Troubleshooting
 
 **Slash commands not appearing**
+
 Ensure the bot was invited with the `applications.commands` scope. Global command registration can take up to one hour on first deployment.
 
 **CLI tool returns "command not found"**
+
 You are running outside Docker. Pull the image and use `docker-compose up -d`.
 
 **AI returns nothing or times out**
+
 The Pollinations API has public rate limits. Set a Pollinations API key via `/setapikey pollinations <key> default` to get a higher limit, or wait and retry.
 
 **Image generation fails in social media commands**
+
 Verify that `resources/profile-lookup.jpg` and `resources/JetBrainsMono-Bold.ttf` exist inside the container (mapped via the `./resources:/app/resources` volume).
 
 **Master key is invalid**
+
 The key has already been used or does not exist. The owner must generate a new one with `/genkey`.
 
 **Bot does not respond to messages (AI chat)**
+
 Ensure `ai_chat` is enabled via `/settings set ai_chat true`, or use DMs or bot mentions instead.
 
 **Database errors on startup**
+
 The bot performs automatic schema migrations on every start. If the `atfot-data` volume is corrupted, restore from a `/db_backup` or delete the volume to start fresh (all user data will be lost).
 
 ---
