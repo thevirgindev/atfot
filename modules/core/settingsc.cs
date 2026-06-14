@@ -1,3 +1,5 @@
+using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Interactions;
@@ -43,8 +45,8 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
             $"║ Theme             : {s.Theme,-26} ║\n" +
             $"║ Notifications     : {s.Notifications,-26} ║\n" +
             $"║ AI Summary        : {(s.AiSummaryEnabled ? "on" : "off"),-26} ║\n" +
-                    $"║ AI Chat           : {(s.AiChatEnabled ? "on" : "off"),-26} ║\n" +
-                    $"║ AI Summary Prompt : {assp,-26} ║\n" +
+            $"║ AI Chat           : {(s.AiChatEnabled ? "on" : "off"),-26} ║\n" +
+            $"║ AI Summary Prompt : {assp,-26} ║\n" +
             $"║ AI Chat Prompt    : {acsp,-26} ║\n" +
             $"║ Updated           : {s.UpdatedAt,-26} ║\n" +
             $"╚══════════════════════════════════════════╝\n```", s.Theme);
@@ -53,8 +55,8 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
 
     [SlashCommand("set", "update theme | notifications | ai_summary | ai_chat")]
     public async Task Set(
-        [Summary("key", "theme, notifications, ai_summary, ai_chat, assp, acsp")] string key,
-        [Summary("value", "theme | notifications | ai_summary | ai_chat (see guide)")] string value)
+        [Summary("key")] string key,
+        [Summary("value")] string value)
     {
         if (!await isAuthed()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
         if (_cd.IsOnCooldown(Context.User.Id.ToString(), out var rem))
@@ -64,40 +66,55 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
         }
         _cd.SetUsed(Context.User.Id.ToString());
 
-        var validKeys = new[] { "theme", "notifications", "ai_summary", "ai_chat", "assp", "acsp" };
-        if (key.ToLower() == "assp" || key.ToLower() == "acsp")
+        var validKeys = new[] { "theme", "notifications", "ai_summary", "ai_chat" };
+        if (!validKeys.Contains(key.ToLower()))
         {
-            // special handling for prompts — allow spaces
-        }
-        else if (!validKeys.Contains(key.ToLower()))
-        {
-            await RespondAsync($"[ERR] invalid key. valid: {string.Join(", ", validKeys)}", ephemeral: true);
+            await RespondAsync($"[ERR] Invalid key. Valid: {string.Join(", ", validKeys)}. Use `/setassp` or `/setacsp` for system prompts.", ephemeral: true);
             return;
         }
 
+        key = key.ToLower();
+        value = value.ToLower();
+
         // validate theme
-        if (key.ToLower() == "theme" && !new[] { "dark", "gray", "white" }.Contains(value.ToLower()))
+        if (key == "theme")
         {
-            await RespondAsync("[ERR] theme must be dark, gray, or white.", ephemeral: true);
-            return;
+            var allowed = new[] { "dark", "gray", "white" };
+            if (!allowed.Contains(value))
+            {
+                await RespondAsync($"[ERR] `theme` must be one of: {string.Join(", ", allowed)}", ephemeral: true);
+                return;
+            }
         }
         // validate notifications
-        if (key.ToLower() == "notifications" && !new[] { "silent", "public" }.Contains(value.ToLower()))
+        else if (key == "notifications")
         {
-            await RespondAsync("[ERR] notifications must be silent or public.", ephemeral: true);
-            return;
+            var allowed = new[] { "silent", "public" };
+            if (!allowed.Contains(value))
+            {
+                await RespondAsync($"[ERR] `notifications` must be one of: {string.Join(", ", allowed)}", ephemeral: true);
+                return;
+            }
         }
         // validate ai_summary
-        if (key.ToLower() == "ai_summary" && !new[] { "on", "off" }.Contains(value.ToLower()))
+        else if (key == "ai_summary")
         {
-            await RespondAsync("[ERR] ai_summary must be on or off.", ephemeral: true);
-            return;
+            var allowed = new[] { "on", "off" };
+            if (!allowed.Contains(value))
+            {
+                await RespondAsync($"[ERR] `ai_summary` must be `on` or `off`", ephemeral: true);
+                return;
+            }
         }
         // validate ai_chat
-        if (key.ToLower() == "ai_chat" && !new[] { "on", "off", "true", "false" }.Contains(value.ToLower()))
+        else if (key == "ai_chat")
         {
-            await RespondAsync("[ERR] ai_chat must be on or off.", ephemeral: true);
-            return;
+            var allowed = new[] { "on", "off", "true", "false" };
+            if (!allowed.Contains(value))
+            {
+                await RespondAsync($"[ERR] `ai_chat` must be `on`, `off`, `true`, or `false`", ephemeral: true);
+                return;
+            }
         }
 
         try
@@ -111,6 +128,98 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
         catch (ArgumentException ex)
         {
             await RespondAsync($"[ERR] {ex.Message}", ephemeral: true);
+        }
+    }
+
+    [SlashCommand("setassp", "set AI summary system prompt from a .txt or .md file")]
+    public async Task SetAssp([Summary("file", "attach a .txt or .md file with your prompt")] IAttachment file)
+    {
+        if (!await isAuthed()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
+        if (_cd.IsOnCooldown(Context.User.Id.ToString(), out var rem))
+        {
+            await RespondAsync($"[WARN] wait a bit.", ephemeral: true);
+            return;
+        }
+        _cd.SetUsed(Context.User.Id.ToString());
+
+        if (!file.Filename.EndsWith(".txt") && !file.Filename.EndsWith(".md"))
+        {
+            await RespondAsync("[ERR] File must be a .txt or .md file.", ephemeral: true);
+            return;
+        }
+
+        if (file.Size > 100_000)
+        {
+            await RespondAsync("[ERR] File too large. Max 100KB.", ephemeral: true);
+            return;
+        }
+
+        await DeferAsync(ephemeral: true);
+
+        try
+        {
+            using var http = new System.Net.Http.HttpClient();
+            var content = await http.GetStringAsync(file.Url);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                await FollowupAsync("[ERR] File is empty.", ephemeral: true);
+                return;
+            }
+            var success = await _settings.UpdateSettingAsync(Context.User.Id.ToString(), "assp", content);
+            if (success)
+                await FollowupAsync($"[DONE] AI Summary system prompt updated ({content.Length} chars from `{file.Filename}`).", ephemeral: true);
+            else
+                await FollowupAsync("[ERR] Failed to save prompt.", ephemeral: true);
+        }
+        catch (System.Exception ex)
+        {
+            await FollowupAsync($"[ERR] Failed to read file: {ex.Message}", ephemeral: true);
+        }
+    }
+
+    [SlashCommand("setacsp", "set AI chat system prompt from a .txt or .md file")]
+    public async Task SetAcsp([Summary("file", "attach a .txt or .md file with your prompt")] IAttachment file)
+    {
+        if (!await isAuthed()) { await RespondAsync("[ERR] redeem a master key first.", ephemeral: true); return; }
+        if (_cd.IsOnCooldown(Context.User.Id.ToString(), out var rem))
+        {
+            await RespondAsync($"[WARN] wait a bit.", ephemeral: true);
+            return;
+        }
+        _cd.SetUsed(Context.User.Id.ToString());
+
+        if (!file.Filename.EndsWith(".txt") && !file.Filename.EndsWith(".md"))
+        {
+            await RespondAsync("[ERR] File must be a .txt or .md file.", ephemeral: true);
+            return;
+        }
+
+        if (file.Size > 100_000)
+        {
+            await RespondAsync("[ERR] File too large. Max 100KB.", ephemeral: true);
+            return;
+        }
+
+        await DeferAsync(ephemeral: true);
+
+        try
+        {
+            using var http = new System.Net.Http.HttpClient();
+            var content = await http.GetStringAsync(file.Url);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                await FollowupAsync("[ERR] File is empty.", ephemeral: true);
+                return;
+            }
+            var success = await _settings.UpdateSettingAsync(Context.User.Id.ToString(), "acsp", content);
+            if (success)
+                await FollowupAsync($"[DONE] AI Chat system prompt updated ({content.Length} chars from `{file.Filename}`).", ephemeral: true);
+            else
+                await FollowupAsync("[ERR] Failed to save prompt.", ephemeral: true);
+        }
+        catch (System.Exception ex)
+        {
+            await FollowupAsync($"[ERR] Failed to read file: {ex.Message}", ephemeral: true);
         }
     }
 }
