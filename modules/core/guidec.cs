@@ -50,7 +50,7 @@ public class GuideCmd : InteractionModuleBase<SocketInteractionContext>
         "**API Key Management**\n" +
         "External OSINT services require API keys. You manage keys per service:\n\n" +
         "`/setapikey <service> <key> default [quota]` — add/set as default\n" +
-        "`/addnewkey <service> <key> [quota]` — add an additional key\n" +
+        "`/setapikey <service> <key> new [quota]` — add an additional key\n" +
         "`/changekey <service> <keyid>` — change the default key by ID\n" +
         "`/mykeys` — view all your API keys (paginated, masked)\n" +
         "`/removeapikey <service> <keyid>` — remove a specific key\n" +
@@ -139,17 +139,21 @@ public class GuideCmd : InteractionModuleBase<SocketInteractionContext>
         "**AI FEATURES**\n" +
         "------------------------------------------------------------\n\n" +
         "**Setup:** AI features require a Pollinations API key. Get one at enter.pollinations.ai, then:\n" +
-        "```\n/setapikey pollinations <your-key> default\n```\n\n" +
+        "```\n/setapikey pollinations <your-key> default\n```\n" +
+        "The bot will validate your key before saving it.\n\n" +
         "**AI Summary** (auto-analysis after commands)\n" +
         "`/settings set ai_summary on` — enables AI analysis after OSINT commands\n" +
-        "`/settings set ai_summary off` — disables it\n\n" +
+        "`/settings set ai_summary off` — disables it\n" +
+        "`/settings set assp <prompt>` — custom AI summary system prompt\n\n" +
         "**AI Chatbot**\n" +
         "Direct Chat — send messages directly to the bot in DMs or mention the bot in channels.\n" +
         "`/chat-reset` — clear conversation history and memory\n" +
         "`/settings set ai_chat true` — bot responds to all your normal messages in channels\n" +
-        "`/settings set ai_chat false` — only responds in DMs/mentions\n\n" +
-        "**Custom system prompt:**\n" +
-        "`/settings set system_prompt your prompt here`\n\n" +
+        "`/settings set ai_chat false` — only responds in DMs/mentions\n" +
+        "`/settings set acsp <prompt>` — custom AI chat system prompt\n\n" +
+        "**Quota System:**\n" +
+        "You can set a daily request limit per key: `/setapikey pollinations <key> default 50`\n" +
+        "Set to `0` for unlimited (default). Quotas reset on bot restart.\n\n" +
         "Both features use Pollinations API via gen.pollinations.ai.",
 
         // page 8
@@ -162,9 +166,10 @@ public class GuideCmd : InteractionModuleBase<SocketInteractionContext>
         "- `notifications` — `silent` (ephemeral) or `public`\n" +
         "- `ai_summary` — `on`/`off` (AI analysis after OSINT commands)\n" +
         "- `ai_chat` — `true`/`false` (bot responds to normal messages with AI)\n" +
-        "- `system_prompt` — custom prompt for AI chatbot\n\n" +
+        "- `assp` — custom AI summary system prompt\n" +
+        "- `acsp` — custom AI chat system prompt\n\n" +
         "**Examples:**\n" +
-        "```\n/settings set theme dark\n/settings set notifications silent\n/settings set ai_summary on\n/settings set ai_chat true\n/settings set system_prompt you are an osint analyst...\n```\n\n" +
+        "```\n/settings set theme dark\n/settings set notifications silent\n/settings set ai_summary on\n/settings set ai_chat true\n/settings set acsp you are an osint analyst...\n```\n\n" +
         "Settings persist per user across restarts.",
 
         // page 9
