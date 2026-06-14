@@ -12,7 +12,7 @@ namespace atfot.core.storage
         public string Theme { get; set; } = "dark";
         public string Notifications { get; set; } = "public";
         public bool AiSummaryEnabled { get; set; } = false;
-        public bool AiChatEnabled { get; set; } = false;
+        public bool AiChatEnabled { get; set; } = true;
         public string SystemPrompt { get; set; } = "";
         public string AiSummarySystemPrompt { get; set; } = "";
         public string AiChatSystemPrompt { get; set; } = "";
@@ -360,7 +360,7 @@ namespace atfot.core.storage
                 var insert = conn.CreateCommand();
                 insert.CommandText = @"
                     INSERT INTO user_settings (discord_id, theme, notifications, ai_summary_enabled, ai_chat_enabled, system_prompt, ai_summary_system_prompt, ai_chat_system_prompt, updated_at)
-                    VALUES ($id, 'dark', 'public', 0, 0, '', '', '', datetime('now'))
+                    VALUES ($id, 'dark', 'public', 0, 1, '', '', '', datetime('now'))
                 ";
                 insert.Parameters.AddWithValue("$id", discord_id);
                 await insert.ExecuteNonQueryAsync();

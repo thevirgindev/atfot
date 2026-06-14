@@ -55,29 +55,39 @@ public class AiChatService
         try
         {
             var resp = await client.PostAsync("https://gen.pollinations.ai/v1/chat/completions", content);
-            if (!resp.IsSuccessStatusCode) return null;
             var json = await resp.Content.ReadAsStringAsync();
+            
+            if (!resp.IsSuccessStatusCode)
+            {
+                Serilog.Log.Warning("Pollinations API returned {StatusCode}: {Body}", resp.StatusCode, json);
+                return $"[ERR] AI service returned {resp.StatusCode}. Try again in a moment.";
+            }
+            
             var obj = JObject.Parse(json);
             var reply = obj["choices"]?[0]?["message"]?["content"]?.ToString();
             
-            if (reply != null)
+            if (string.IsNullOrEmpty(reply))
             {
-                // extract and persist memory tag, then strip it from reply
-                var memoryMatch = Regex.Match(reply, @"<save_memory>(.*?)</save_memory>", RegexOptions.Singleline);
-                if (memoryMatch.Success)
-                {
-                    var newMemory = memoryMatch.Groups[1].Value.Trim();
-                    if (!string.IsNullOrEmpty(newMemory))
-                        await _db.SaveUserMemoryAsync(userId, newMemory);
-                    reply = Regex.Replace(reply, @"<save_memory>.*?</save_memory>", "", RegexOptions.Singleline).Trim();
-                }
-                await _db.SaveChatMessageAsync(userId, "assistant", reply);
+                Serilog.Log.Warning("Pollinations API returned empty reply. Raw: {Json}", json);
+                return "[ERR] AI returned an empty response. Try again.";
             }
+
+            // extract and persist memory tag, then strip it from reply
+            var memoryMatch = Regex.Match(reply, @"<save_memory>(.*?)</save_memory>", RegexOptions.Singleline);
+            if (memoryMatch.Success)
+            {
+                var newMemory = memoryMatch.Groups[1].Value.Trim();
+                if (!string.IsNullOrEmpty(newMemory))
+                    await _db.SaveUserMemoryAsync(userId, newMemory);
+                reply = Regex.Replace(reply, @"<save_memory>.*?</save_memory>", "", RegexOptions.Singleline).Trim();
+            }
+            await _db.SaveChatMessageAsync(userId, "assistant", reply);
             return reply;
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            Serilog.Log.Error(ex, "AI chat request failed for user {UserId}", userId);
+            return "[ERR] AI chat failed. Check logs or try again later.";
         }
     }
 
