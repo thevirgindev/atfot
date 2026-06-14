@@ -79,7 +79,7 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
         // validate theme
         if (key == "theme")
         {
-            var allowed = new[] { "dark", "gray", "white" };
+            var allowed = new[] { "dark", "gray", "white", "random" };
             if (!allowed.Contains(value))
             {
                 await RespondAsync($"[ERR] `theme` must be one of: {string.Join(", ", allowed)}", ephemeral: true);

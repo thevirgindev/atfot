@@ -10,10 +10,13 @@ public class EmbedBuilderService
     private static readonly Color IndustrialGray = new(0x55, 0x55, 0x55);
     private static readonly Color StarkWhite = new(0xFA, 0xFA, 0xFA);
 
+    private static readonly Random _rng = new();
+
     private static Color ResolveColor(string variant) => variant.ToLower() switch
     {
         "white" => StarkWhite,
         "gray" => IndustrialGray,
+        "random" => new[] { DarkBlack, IndustrialGray, StarkWhite }[_rng.Next(3)],
         _ => DarkBlack
     };
 
