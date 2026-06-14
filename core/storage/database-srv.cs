@@ -32,6 +32,8 @@ namespace atfot.core.storage
             migrate_ai_summary_column();
             migrate_new_settings();
             migrate_system_prompts();
+            migrate_enable_ai_chat();
+            migrate_reset_daily_quotas();
         }
 
         private void init_db()
@@ -240,6 +242,24 @@ namespace atfot.core.storage
                 a.CommandText = "ALTER TABLE user_settings ADD COLUMN ai_chat_system_prompt TEXT DEFAULT ''";
                 try { a.ExecuteNonQuery(); } catch { }
             }
+        }
+
+        private void migrate_enable_ai_chat()
+        {
+            using var conn = new SqliteConnection(_conn);
+            conn.Open();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE user_settings SET ai_chat_enabled = 1 WHERE ai_chat_enabled = 0";
+            cmd.ExecuteNonQuery();
+        }
+
+        private void migrate_reset_daily_quotas()
+        {
+            using var conn = new SqliteConnection(_conn);
+            conn.Open();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE user_api_keys SET requests_today = 0, is_active = 1 WHERE total_quota = 0 AND is_active = 0";
+            cmd.ExecuteNonQuery();
         }
 
         // ========== USER AUTH & REDEMPTIONS (snake_case originals) ==========
