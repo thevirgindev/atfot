@@ -81,6 +81,18 @@ namespace atfot.core.storage
                     ai_summary_enabled INTEGER DEFAULT 0,
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
+                CREATE TABLE IF NOT EXISTS user_chat_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    discord_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now'))
+                );
+                CREATE TABLE IF NOT EXISTS user_memories (
+                    discord_id TEXT PRIMARY KEY,
+                    memory_text TEXT NOT NULL,
+                    updated_at TEXT DEFAULT (datetime('now'))
+                );
             ";
             cmd.ExecuteNonQuery();
         }
@@ -147,7 +159,7 @@ namespace atfot.core.storage
             }
         }
 
-        // drops old columns by recreating the table (sqlite doesn't support DROP COLUMN before 3.35)
+        // recreates user_settings to add system_prompt and ai_chat_enabled columns
         private void migrate_new_settings()
         {
             using var conn = new SqliteConnection(_conn);
@@ -571,7 +583,7 @@ namespace atfot.core.storage
             return Convert.ToInt32(await cmd.ExecuteScalarAsync());
         }
 
-        // ========== ASYNC WRAPPER METHODS (for service compatibility) ==========
+        // ========== PascalCase wrappers for service compatibility ==========
         public async Task<int> AddApiKeyAsync(string discordId, string service, string apiKey, bool isDefault = false, int totalQuota = -1)
             => await add_api_key(discordId, service, apiKey, isDefault, totalQuota);
 
@@ -634,5 +646,72 @@ namespace atfot.core.storage
 
         public async Task<int> GetTotalAuthorizedUsersAsync()
             => await get_total_authorized_users();
+
+        // ========== CHAT HISTORY & MEMORY ==========
+        public async Task SaveChatMessageAsync(string discordId, string role, string content)
+        {
+            await using var conn = new SqliteConnection(_conn);
+            await conn.OpenAsync();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "INSERT INTO user_chat_history (discord_id, role, content) VALUES ($id, $role, $content)";
+            cmd.Parameters.AddWithValue("$id", discordId);
+            cmd.Parameters.AddWithValue("$role", role);
+            cmd.Parameters.AddWithValue("$content", content);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<List<(string role, string content)>> GetChatHistoryAsync(string discordId, int limit)
+        {
+            await using var conn = new SqliteConnection(_conn);
+            await conn.OpenAsync();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT role, content FROM user_chat_history WHERE discord_id = $id ORDER BY id DESC LIMIT $limit";
+            cmd.Parameters.AddWithValue("$id", discordId);
+            cmd.Parameters.AddWithValue("$limit", limit);
+            var res = new List<(string, string)>();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                res.Add((reader.GetString(0), reader.GetString(1)));
+            }
+            res.Reverse();
+            return res;
+        }
+
+        public async Task ClearChatHistoryAsync(string discordId)
+        {
+            await using var conn = new SqliteConnection(_conn);
+            await conn.OpenAsync();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM user_chat_history WHERE discord_id = $id";
+            cmd.Parameters.AddWithValue("$id", discordId);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task SaveUserMemoryAsync(string discordId, string memoryText)
+        {
+            await using var conn = new SqliteConnection(_conn);
+            await conn.OpenAsync();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                INSERT INTO user_memories (discord_id, memory_text, updated_at)
+                VALUES ($id, $text, datetime('now'))
+                ON CONFLICT(discord_id) DO UPDATE SET memory_text = $text, updated_at = datetime('now')
+            ";
+            cmd.Parameters.AddWithValue("$id", discordId);
+            cmd.Parameters.AddWithValue("$text", memoryText);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<string> GetUserMemoryAsync(string discordId)
+        {
+            await using var conn = new SqliteConnection(_conn);
+            await conn.OpenAsync();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT memory_text FROM user_memories WHERE discord_id = $id";
+            cmd.Parameters.AddWithValue("$id", discordId);
+            var res = await cmd.ExecuteScalarAsync();
+            return res?.ToString() ?? string.Empty;
+        }
     }
 }
