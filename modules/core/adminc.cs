@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using Discord;
@@ -140,7 +141,7 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
     public async Task SetApiKey(
         [Summary("service")] string service,
         [Summary("apikey")] string apiKey,
-        [Summary("type", "default or other")] string type = "default",
+        [Summary("type", "default or new")] string type = "default",
         [Summary("quota", "daily request limit (0 = unlimited)")] int quota = 0)
     {
         if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var _))
@@ -156,6 +157,32 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
             return;
         }
         bool isDefault = type.ToLower() == "default";
+
+        if (service == "pollinations")
+        {
+            try
+            {
+                using var httpClient = new HttpClient();
+                httpClient.Timeout = TimeSpan.FromSeconds(15);
+                if (!string.IsNullOrEmpty(apiKey))
+                    httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                var testPayload = new { model = "openai", messages = new[] { new { role = "user", content = "hi" } }, max_tokens = 1 };
+                var testContent = new StringContent(Newtonsoft.Json.Linq.JObject.FromObject(testPayload).ToString(), System.Text.Encoding.UTF8, "application/json");
+                var testResp = await httpClient.PostAsync("https://gen.pollinations.ai/v1/chat/completions", testContent);
+                if (!testResp.IsSuccessStatusCode)
+                {
+                    var statusCode = (int)testResp.StatusCode;
+                    await RespondAsync($"[ERR] Invalid API key. The API rejected this key (HTTP {statusCode}). Please check your key and try again.", ephemeral: true);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                await RespondAsync($"[ERR] Failed to validate API key: {ex.Message}. Key was not saved.", ephemeral: true);
+                return;
+            }
+        }
+
         var id = await _apiKeyService.AddApiKeyAsync(Context.User.Id.ToString(), service, apiKey, isDefault, quota);
         await RespondAsync($"[OK] API key for **{service}** added (ID: {id}, type: {type}). {Sarcasm.Get()}", ephemeral: true);
     }
