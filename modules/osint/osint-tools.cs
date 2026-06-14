@@ -216,7 +216,7 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
             });
         if (result == null)
         {
-            await ShowError(loading.Id, "no working keys or no data.");
+            await ShowError(loading.Id, "Docker is not running, or no data found.");
             return;
         }
         var data = result["data"];
@@ -247,7 +247,7 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
             });
         if (result == null)
         {
-            await ShowError(loading.Id, "no working keys or no data.");
+            await ShowError(loading.Id, "No API key configured or no data found. Use `/setapikey` to add a key.");
             return;
         }
         var city = result["city"]?.Value<string>() ?? "Unknown";
@@ -307,7 +307,7 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
             });
         if (result == null)
         {
-            await ShowError(loading.Id, "no working keys or no results.");
+            await ShowError(loading.Id, "No API key configured or no results found. Use `/setapikey` to add a key.");
             return;
         }
         var results = result["results"] as JArray;
