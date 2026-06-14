@@ -51,9 +51,10 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
     [SlashCommand("redeem", "redeem a master key to activate the bot (one attempt per hour)")]
     public async Task RedeemKey([Summary("key")] string key)
     {
+        await DeferAsync(ephemeral: true);
         if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
         {
-            await RespondAsync("[WAIT] wait a bit.", ephemeral: true);
+            await FollowupAsync("[WAIT] wait a bit.", ephemeral: true);
             return;
         }
         _cooldown.SetUsed(Context.User.Id.ToString());
@@ -63,7 +64,7 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
         // Check if already authorized
         if (await _keyService.IsAuthorizedAsync(userId))
         {
-            await RespondAsync("[ERR] You already have a master key redeemed. One key per user.", ephemeral: true);
+            await FollowupAsync("[ERR] You already have a master key redeemed. One key per user.", ephemeral: true);
             return;
         }
 
@@ -74,7 +75,7 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
             if (timeSince < TimeSpan.FromHours(1))
             {
                 var remainingTime = TimeSpan.FromHours(1) - timeSince;
-                await RespondAsync($"[WAIT] You must wait {remainingTime.Minutes}m {remainingTime.Seconds}s before trying again.", ephemeral: true);
+                await FollowupAsync($"[WAIT] You must wait {remainingTime.Minutes}m {remainingTime.Seconds}s before trying again.", ephemeral: true);
                 return;
             }
         }
@@ -101,14 +102,14 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
                 }
             }
             var embed = _embed.CreateMonochromeEmbed("key redemption", "Master key redeemed. Full access granted.", "white");
-            await RespondAsync(embed: embed, ephemeral: true);
+            await FollowupAsync(embed: embed, ephemeral: true);
 
             // No need for cooldown DM on success because user won't try again
         }
         else
         {
             var embed = _embed.CreateMonochromeEmbed("key redemption", "Invalid or already used master key.", "gray");
-            await RespondAsync(embed: embed, ephemeral: true);
+            await FollowupAsync(embed: embed, ephemeral: true);
 
             // Schedule a DM after cooldown expires (only if not already scheduled)
             if (!_pendingDmTasks.ContainsKey(userId))
