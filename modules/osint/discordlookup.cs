@@ -25,6 +25,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
     private readonly IHttpClientFactory _httpFactory;
     private readonly ImageService _imageService;
     private readonly AiSummaryService _aiSummary;
+    private readonly SettingsService _settings;
 
     private static readonly Dictionary<string, List<(string toolId, string toolName, string result, string? rawJson)>> _toolResultsCache = new();
 
@@ -48,7 +49,8 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
         SocialMediaService socialMedia,
         IHttpClientFactory httpFactory,
         ImageService imageService,
-        AiSummaryService aiSummary)
+        AiSummaryService aiSummary,
+        SettingsService settings)
     {
         _keyService = keyService;
         _apiKeyService = apiKeyService;
@@ -59,6 +61,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
         _httpFactory = httpFactory;
         _imageService = imageService;
         _aiSummary = aiSummary;
+        _settings = settings;
     }
 
     private async Task<bool> EnsureAuthorized() => await _keyService.IsAuthorizedAsync(Context.User.Id.ToString());
@@ -81,6 +84,7 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
 
         await DeferAsync();
 
+        var userSettings = await _settings.GetUserSettingsAsync(Context.User.Id.ToString());
         var sessionId = Guid.NewGuid().ToString("N");
         var loadingEmbed = new EmbedBuilder()
             .WithTitle("Discord Lookup")
@@ -146,9 +150,9 @@ public class DiscordLookupCmd : InteractionModuleBase<SocketInteractionContext>
             {
                 var (summary, rawJson) = await fetch(userId, apiKey ?? "");
                 
-                // AI summary replacement (if enabled and rawJson exists)
+                // replace with AI summary if enabled
                 string finalSummary = summary;
-                if (!string.IsNullOrEmpty(rawJson) && await _aiSummary.generateAsync(Context.User.Id.ToString(), rawJson, $"Discord user {userId}") != null)
+                if (userSettings.AiSummaryEnabled && !string.IsNullOrEmpty(rawJson))
                 {
                     var aiSummaryText = await _aiSummary.generateAsync(Context.User.Id.ToString(), rawJson, $"Discord user {userId}");
                     if (!string.IsNullOrEmpty(aiSummaryText))
