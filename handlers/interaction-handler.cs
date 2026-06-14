@@ -52,12 +52,16 @@ public class InteractionHandler
                 return;
 
             var userId = userMsg.Author.Id.ToString();
+            Log.Information("Message received from {UserId} in {Channel}", userId, userMsg.Channel);
             
             try
             {
                 var keySvc = _services.GetRequiredService<KeyRedemptionService>();
                 if (!await keySvc.IsAuthorizedAsync(userId))
+                {
+                    Log.Warning("User {UserId} not authorized, skipping message", userId);
                     return;
+                }
 
                 var settingsSvc = _services.GetRequiredService<SettingsService>();
                 var userSettings = await settingsSvc.GetUserSettingsAsync(userId);
@@ -65,12 +69,16 @@ public class InteractionHandler
                 bool isDm = userMsg.Channel is Discord.IDMChannel;
                 bool isMentioned = userMsg.MentionedUsers.Any(u => u.Id == _client.CurrentUser.Id);
                 bool isAiChatEnabled = userSettings.AiChatEnabled;
+                Log.Information("User {UserId} AI chat={Enabled}, DM={IsDM}, mentioned={Mentioned}", userId, isAiChatEnabled, isDm, isMentioned);
 
                 if (isAiChatEnabled || isDm || isMentioned)
                 {
                     var cd = _services.GetRequiredService<CooldownService>();
                     if (cd.IsOnCooldown(userId, out _))
+                    {
+                        Log.Warning("User {UserId} on cooldown, skipping", userId);
                         return;
+                    }
 
                     cd.SetUsed(userId);
 
@@ -89,6 +97,7 @@ public class InteractionHandler
                     var apiKey = await apiKeySvc.GetApiKeyAsync(userId, "pollinations");
                     if (string.IsNullOrEmpty(apiKey))
                     {
+                        Log.Warning("User {UserId} has no Pollinations API key", userId);
                         await userMsg.Channel.SendMessageAsync("[ERR] Please set a Pollinations API key first using `/setapikey`. You can obtain a free key at [pollinations.ai](https://pollinations.ai).", messageReference: new MessageReference(userMsg.Id));
                         return;
                     }
@@ -101,6 +110,7 @@ public class InteractionHandler
                         : userSettings.AiChatSystemPrompt;
 
                     var reply = await aiChat.chatAsync(userId, content, sysPrompt);
+                    Log.Information("AI chat reply for {UserId}: {Length} chars", userId, reply?.Length ?? 0);
 
                     if (!string.IsNullOrEmpty(reply))
                     {
@@ -125,7 +135,7 @@ public class InteractionHandler
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error handling message in direct chat handler");
+                Log.Error(ex, "Error in message handler for user {UserId}", userId);
             }
         };
     }
