@@ -26,7 +26,7 @@ public class GuideCmd : InteractionModuleBase<SocketInteractionContext>
         "- Threat intelligence (CVE lookup, C2 feed checking, malware hash analysis)\n" +
         "- AI-powered summaries after any OSINT command (requires `pollinations` API key)\n" +
         "- Free unlimited AI chatbot (responds to normal messages when enabled; requires `pollinations` API key)\n" +
-        "- Dashboard (React+TS, in progress)\n\n" +
+        "- Payload generation via msfvenom (Docker only)\n\n" +
         "**Getting started:**\n" +
         "1. The bot owner runs `/genkey` to generate a master key\n" +
         "2. Share the key with a trusted user who runs `/redeem <key>`\n" +
@@ -119,7 +119,7 @@ public class GuideCmd : InteractionModuleBase<SocketInteractionContext>
         // page 6
         "**CLI TOOLS (DOCKER)**\n" +
         "------------------------------------------------------------\n\n" +
-        "Bot must run in Docker for CLI tools. All tools are pre-installed.\n\n" +
+        "Bot must run in Docker for CLI tools. If not running in Docker, the bot will tell you to run Docker first.\n\n" +
         "**Available tools:**\n" +
         "- `/osint sherlock <username>` — 400+ sites username search\n" +
         "- `/osint harvester <domain>` — emails/subdomains\n" +
@@ -132,7 +132,14 @@ public class GuideCmd : InteractionModuleBase<SocketInteractionContext>
         "- `/osint whocord <type> <target>` — all-in-one OSINT\n" +
         "- `/osint sublist3r <domain>` — subdomain enum\n" +
         "- `/osint whatweb <target>` — website fingerprinting\n" +
-        "- `/osint dnsrecon <domain>` — DNS enumeration\n\n" +
+        "- `/osint dnsrecon <domain>` — DNS enumeration\n" +
+        "- `/osint phoneinfoga <phone>` — PhoneInfoga CLI\n" +
+        "- `/osint photon <url>` — Photon crawler\n" +
+        "- `/osint waybackurls <domain>` — Wayback Machine URLs\n" +
+        "- `/osint gau <domain>` — all URLs from OSINT sources\n" +
+        "- `/osint holehe <email>` — email site registration check\n\n" +
+        "**Payload generation (Docker only):**\n" +
+        "`/misc generate <type> <lhost> <lport>` — generate pentest payload (reverse_tcp, reverse_http, bind_tcp, exe, elf, apk, ps1, dll, war, php)\n\n" +
         "Each command runs inside Docker, returns parsed output with TXT/JSON export. Expect 30-120s.",
 
         // page 7
@@ -144,13 +151,13 @@ public class GuideCmd : InteractionModuleBase<SocketInteractionContext>
         "**AI Summary** (auto-analysis after commands)\n" +
         "`/settings set ai_summary on` — enables AI analysis after OSINT commands\n" +
         "`/settings set ai_summary off` — disables it\n" +
-        "`/settings set assp <prompt>` — custom AI summary system prompt\n\n" +
+        "`/setassp <file>` — set custom AI summary system prompt (attach .txt/.md file)\n\n" +
         "**AI Chatbot**\n" +
         "Direct Chat — send messages directly to the bot in DMs or mention the bot in channels.\n" +
         "`/chat-reset` — clear conversation history and memory\n" +
-        "`/settings set ai_chat true` — bot responds to all your normal messages in channels\n" +
-        "`/settings set ai_chat false` — only responds in DMs/mentions\n" +
-        "`/settings set acsp <prompt>` — custom AI chat system prompt\n\n" +
+        "`/settings set ai_chat on` — bot responds to all your normal messages in channels\n" +
+        "`/settings set ai_chat off` — only responds in DMs/mentions\n" +
+        "`/setacsp <file>` — set custom AI chat system prompt (attach .txt/.md file)\n\n" +
         "**Quota System:**\n" +
         "You can set a daily request limit per key: `/setapikey pollinations <key> default 50`\n" +
         "Set to `0` for unlimited (default). Quotas reset on bot restart.\n\n" +
@@ -162,14 +169,15 @@ public class GuideCmd : InteractionModuleBase<SocketInteractionContext>
         "`/settings show` — view current settings\n" +
         "`/settings set <key> <value>` — update a setting\n\n" +
         "**Available settings:**\n" +
-        "- `theme` — `dark`, `gray`, `white`\n" +
+        "- `theme` — `dark`, `gray`, `white`, `random`\n" +
         "- `notifications` — `silent` (ephemeral) or `public`\n" +
         "- `ai_summary` — `on`/`off` (AI analysis after OSINT commands)\n" +
-        "- `ai_chat` — `true`/`false` (bot responds to normal messages with AI)\n" +
-        "- `assp` — custom AI summary system prompt\n" +
-        "- `acsp` — custom AI chat system prompt\n\n" +
+        "- `ai_chat` — `on`/`off` (bot responds to normal messages with AI)\n\n" +
+        "**System prompts (via file attachment):**\n" +
+        "`/setassp <file>` — upload a .txt/.md file for AI summary prompt\n" +
+        "`/setacsp <file>` — upload a .txt/.md file for AI chat prompt\n\n" +
         "**Examples:**\n" +
-        "```\n/settings set theme dark\n/settings set notifications silent\n/settings set ai_summary on\n/settings set ai_chat true\n/settings set acsp you are an osint analyst...\n```\n\n" +
+        "```\n/settings set theme dark\n/settings set notifications silent\n/settings set ai_summary on\n/settings set ai_chat on\n```\n\n" +
         "Settings persist per user across restarts.",
 
         // page 9
@@ -207,12 +215,17 @@ public class GuideCmd : InteractionModuleBase<SocketInteractionContext>
         // page 11
         "**UPDATES & ROADMAP**\n" +
         "------------------------------------------------------------\n\n" +
-        "**Current version:** v1.0 (Docker)\n\n" +
+        "**Current version:** v1.1 (Docker)\n\n" +
         "**Recent features:**\n" +
+        "- `/setassp` and `/setacsp` — upload system prompts via file attachment (`.txt`/`.md`)\n" +
+        "- Random theme option\n" +
+        "- Channel restriction via `channel_id` in .env\n" +
+        "- Payload generation with `/misc generate`\n" +
+        "- `/ping` and `/uptime` commands\n" +
+        "- Direct message support (AI chat in DMs)\n" +
         "- Unified social media carousel (8 platforms)\n" +
         "- AI-powered chatbot and command summaries (Pollinations API)\n" +
-        "- Settings system (theme, notifications, AI config)\n" +
-        "- Dashboard (React+TS) in progress\n\n" +
+        "- Settings system (theme, notifications, AI config)\n\n" +
         "**Planned:**\n" +
         "- Dashboard: stats, redemptions, API usage\n" +
         "- More OSINT tool integrations\n" +
