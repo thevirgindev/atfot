@@ -60,6 +60,7 @@ public class InteractionHandler
                 if (!await keySvc.IsAuthorizedAsync(userId))
                 {
                     Log.Warning("User {UserId} not authorized, skipping message", userId);
+                    await userMsg.Channel.SendMessageAsync("[ERR] You need to redeem a master key first. Use `/redeem <key>` to get access.", messageReference: new MessageReference(userMsg.Id));
                     return;
                 }
 
