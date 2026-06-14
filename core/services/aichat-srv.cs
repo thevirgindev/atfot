@@ -25,7 +25,7 @@ public class AiChatService
         _db = db;
     }
 
-    public async Task<string?> chatAsync(string userId, string userMsg, string? systemPrompt = null)
+    public async Task<string?> chatAsync(string userId, string userMsg, string? systemPrompt = null, int? keyId = null)
     {
         var memoryText = await _db.GetUserMemoryAsync(userId);
         var dbHistory = await _db.GetChatHistoryAsync(userId, maxMsgs);
@@ -82,6 +82,8 @@ public class AiChatService
                 reply = Regex.Replace(reply, @"<save_memory>.*?</save_memory>", "", RegexOptions.Singleline).Trim();
             }
             await _db.SaveChatMessageAsync(userId, "assistant", reply);
+            if (keyId.HasValue)
+                await _db.IncrementKeyUsageAsync(keyId.Value, userId);
             return reply;
         }
         catch (Exception ex)
