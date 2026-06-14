@@ -17,44 +17,42 @@ RUN apt-get update && apt-get install -y \
     whatweb dnsrecon \
     && rm -rf /var/lib/apt/lists/*
 
-# Install SpiderFoot (GitHub clone, not PyPI)
+# Install SpiderFoot
 RUN git clone https://github.com/smicallef/spiderfoot.git /opt/spiderfoot \
     && cd /opt/spiderfoot \
     && pip3 install --break-system-packages --no-cache-dir -r requirements.txt \
     && ln -sf /opt/spiderfoot/sf.py /usr/local/bin/sf
 
-# Install recon-ng (GitHub clone, not PyPI)
+# Install recon-ng
 RUN git clone https://github.com/lanmaster53/recon-ng.git /opt/recon-ng \
     && cd /opt/recon-ng \
     && pip3 install --break-system-packages --no-cache-dir -r REQUIREMENTS \
     && ln -sf /opt/recon-ng/recon-ng /usr/local/bin/recon-ng
 
-# Install Photon (OSINT URL/domain crawler, GitHub clone)
+# Install Photon
 RUN git clone https://github.com/s0md3v/Photon.git /opt/photon \
     && cd /opt/photon \
     && pip3 install --break-system-packages --no-cache-dir -r requirements.txt \
     && printf '#!/bin/sh\nexec python3 /opt/photon/photon.py "$@"\n' > /usr/local/bin/photon \
     && chmod +x /usr/local/bin/photon
 
-# Install maigret (username OSINT, GitHub clone)
+# Install maigret (pip install . creates CLI entry point automatically)
 RUN git clone https://github.com/soxoj/maigret.git /opt/maigret \
     && cd /opt/maigret \
-    && pip3 install --break-system-packages --no-cache-dir -r requirements.txt \
-    && printf '#!/bin/sh\nexec python3 /opt/maigret/maigret.py "$@"\n' > /usr/local/bin/maigret \
-    && chmod +x /usr/local/bin/maigret
+    && pip3 install --break-system-packages --no-cache-dir .
 
-# Install theHarvester (email/subdomain OSINT, GitHub clone)
+# Install theHarvester
 RUN git clone https://github.com/laramies/theHarvester.git /opt/theharvester \
     && cd /opt/theharvester \
     && pip3 install --break-system-packages --no-cache-dir -r requirements.txt \
     && printf '#!/bin/sh\nexec python3 /opt/theharvester/theHarvester.py "$@"\n' > /usr/local/bin/theHarvester \
     && chmod +x /usr/local/bin/theHarvester
 
-# Install other Python CLI tools that ARE on PyPI
+# Install PyPI Python CLI tools
 RUN pip3 install --break-system-packages --no-cache-dir \
     sherlock-project torbot whocord holehe sublist3r
 
-# Install Go tools (subfinder, amass, waybackurls, gau)
+# Install Go tools
 RUN go install -v github.com/subfinder/subfinder/v2/cmd/subfinder@latest && \
     go install -v github.com/owasp-amass/amass/v4/...@master && \
     go install -v github.com/tomnomnom/waybackurls@latest && \
