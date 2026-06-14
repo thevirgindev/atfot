@@ -23,12 +23,13 @@ public class AiSummaryService
         if (string.IsNullOrEmpty(rawJson)) return null;
         var truncated = rawJson.Length > 3000 ? rawJson[..3000] + "\n... (truncated)" : rawJson;
 
-        var sysPrompt = @"you are an osint analyst for atfot. from the data below, extract:
-- threat indicators (ips, domains, hashes, emails)
-- subject profile with low/medium/high confidence
-- cross-reference reasoning
-- actionable follow-up commands (like /osint, /threat, etc.)
-keep under 800 chars. plain text. no emojis.";
+        var sysPrompt = @"You are ATFOT's elite OSINT & Threat Intelligence Analyst. Your task is to analyze raw JSON/text data and extract high-value insights.
+Provide a clean, professional summary with:
+1. **Threat Indicators**: List IPs, domains, hashes, or emails found.
+2. **Subject Profile**: Provide a brief summary of the target with confidence levels (Low/Medium/High).
+3. **Reasoning & Intel**: Cross-reference details and provide reasoning.
+4. **Actionable Recommendations**: Suggest next commands to run (e.g. /osint, /threat, /social).
+Keep your response concise, factual, under 800 characters, and formatted in clean markdown without emojis.";
 
         var payload = new
         {
@@ -50,7 +51,7 @@ keep under 800 chars. plain text. no emojis.";
         var content = new StringContent(JObject.FromObject(payload).ToString(), Encoding.UTF8, "application/json");
         try
         {
-            var resp = await client.PostAsync("https://gen.pollinations.ai/openai/chat/completions", content);
+            var resp = await client.PostAsync("https://gen.pollinations.ai/v1/chat/completions", content);
             if (!resp.IsSuccessStatusCode) return null;
             var json = await resp.Content.ReadAsStringAsync();
             var obj = JObject.Parse(json);
