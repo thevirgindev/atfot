@@ -97,9 +97,7 @@ public class InteractionHandler
 
                     var aiChat = _services.GetRequiredService<AiChatService>();
                     var sysPrompt = string.IsNullOrEmpty(userSettings.AiChatSystemPrompt)
-                        ? (string.IsNullOrEmpty(userSettings.SystemPrompt)
-                            ? "you are atfot's ai assistant. help with osint analysis, technical questions, and general knowledge. be concise and direct."
-                            : userSettings.SystemPrompt)
+                        ? "you are atfot's ai assistant. help with osint analysis, technical questions, and general knowledge. be concise and direct."
                         : userSettings.AiChatSystemPrompt;
 
                     var reply = await aiChat.chatAsync(userId, content, sysPrompt);
