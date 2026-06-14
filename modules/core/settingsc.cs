@@ -36,6 +36,8 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
 
         var s = await _settings.GetUserSettingsAsync(Context.User.Id.ToString());
         var prompt = string.IsNullOrEmpty(s.SystemPrompt) ? "(default)" : s.SystemPrompt.Length > 40 ? s.SystemPrompt[..40] + "..." : s.SystemPrompt;
+        var assp = string.IsNullOrEmpty(s.AiSummarySystemPrompt) ? "(default)" : s.AiSummarySystemPrompt.Length > 30 ? s.AiSummarySystemPrompt[..30] + "..." : s.AiSummarySystemPrompt;
+        var acsp = string.IsNullOrEmpty(s.AiChatSystemPrompt) ? "(default)" : s.AiChatSystemPrompt.Length > 30 ? s.AiChatSystemPrompt[..30] + "..." : s.AiChatSystemPrompt;
         var emb = _emb.CreateMonochromeEmbed("user settings",
             $"```\n" +
             $"╔══════════════════════════════════════════╗\n" +
@@ -44,6 +46,8 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
             $"║ AI Summary        : {(s.AiSummaryEnabled ? "on" : "off"),-26} ║\n" +
             $"║ AI Chat           : {(s.AiChatEnabled ? "on" : "off"),-26} ║\n" +
             $"║ System Prompt     : {prompt,-26} ║\n" +
+            $"║ AI Summary Prompt : {assp,-26} ║\n" +
+            $"║ AI Chat Prompt    : {acsp,-26} ║\n" +
             $"║ Updated           : {s.UpdatedAt,-26} ║\n" +
             $"╚══════════════════════════════════════════╝\n```", s.Theme);
         await RespondAsync(embed: emb);
@@ -62,10 +66,10 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
         }
         _cd.SetUsed(Context.User.Id.ToString());
 
-        var validKeys = new[] { "theme", "notifications", "ai_summary", "ai_chat", "system_prompt" };
-        if (key.ToLower() == "system_prompt")
+        var validKeys = new[] { "theme", "notifications", "ai_summary", "ai_chat", "system_prompt", "assp", "acsp" };
+        if (key.ToLower() == "system_prompt" || key.ToLower() == "assp" || key.ToLower() == "acsp")
         {
-            // special handling for prompt — allow spaces
+            // special handling for prompts — allow spaces
         }
         else if (!validKeys.Contains(key.ToLower()))
         {
@@ -92,9 +96,9 @@ public class SettingsCmd : InteractionModuleBase<SocketInteractionContext>
             return;
         }
         // validate ai_chat
-        if (key.ToLower() == "ai_chat" && !new[] { "true", "false" }.Contains(value.ToLower()))
+        if (key.ToLower() == "ai_chat" && !new[] { "on", "off", "true", "false" }.Contains(value.ToLower()))
         {
-            await RespondAsync("[ERR] ai_chat must be true or false.", ephemeral: true);
+            await RespondAsync("[ERR] ai_chat must be on or off.", ephemeral: true);
             return;
         }
 

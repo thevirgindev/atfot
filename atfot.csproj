@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -11,8 +11,7 @@
     <!-- Discord -->
     <PackageReference Include="Discord.Net" Version="3.19.1" />
     <PackageReference Include="DotNetEnv" Version="3.2.0" />
-    <PackageReference Include="FlareSolverrSharp" Version="1.0.0" />
-    <PackageReference Include="LXGaming.FlareSolverr" Version="2.1.0" />
+
 
     <!-- Database -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />

@@ -14,6 +14,8 @@ namespace atfot.core.storage
         public bool AiSummaryEnabled { get; set; } = false;
         public bool AiChatEnabled { get; set; } = false;
         public string SystemPrompt { get; set; } = "";
+        public string AiSummarySystemPrompt { get; set; } = "";
+        public string AiChatSystemPrompt { get; set; } = "";
         public string UpdatedAt { get; set; } = "";
     }
 
@@ -30,6 +32,7 @@ namespace atfot.core.storage
             migrate_quota_columns();
             migrate_ai_summary_column();
             migrate_new_settings();
+            migrate_system_prompts();
         }
 
         private void init_db()
@@ -66,7 +69,7 @@ namespace atfot.core.storage
                     is_default INTEGER DEFAULT 0,
                     created_at TEXT DEFAULT (datetime('now')),
                     requests_today INTEGER DEFAULT 0,
-                    total_quota INTEGER DEFAULT -1,
+                    total_quota INTEGER DEFAULT 0,
                     rate_limit_reset TEXT,
                     last_used TEXT,
                     is_active INTEGER DEFAULT 1
@@ -209,6 +212,37 @@ namespace atfot.core.storage
             }
         }
 
+        // adds ai_summary_system_prompt and ai_chat_system_prompt columns to user_settings
+        private void migrate_system_prompts()
+        {
+            using var conn = new SqliteConnection(_conn);
+            conn.Open();
+            var check = conn.CreateCommand();
+            check.CommandText = "PRAGMA table_info(user_settings)";
+            bool hasAssp = false, hasAcsp = false;
+            using (var r = check.ExecuteReader())
+            {
+                while (r.Read())
+                {
+                    var col = r.GetString(1);
+                    if (col == "ai_summary_system_prompt") hasAssp = true;
+                    if (col == "ai_chat_system_prompt") hasAcsp = true;
+                }
+            }
+            if (!hasAssp)
+            {
+                var a = conn.CreateCommand();
+                a.CommandText = "ALTER TABLE user_settings ADD COLUMN ai_summary_system_prompt TEXT DEFAULT ''";
+                try { a.ExecuteNonQuery(); } catch { }
+            }
+            if (!hasAcsp)
+            {
+                var a = conn.CreateCommand();
+                a.CommandText = "ALTER TABLE user_settings ADD COLUMN ai_chat_system_prompt TEXT DEFAULT ''";
+                try { a.ExecuteNonQuery(); } catch { }
+            }
+        }
+
         // ========== USER AUTH & REDEMPTIONS (snake_case originals) ==========
         public async Task<bool> redeem_key(string key, string discord_id)
         {
@@ -300,7 +334,8 @@ namespace atfot.core.storage
             var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT discord_id, theme, notifications, ai_summary_enabled,
-                       ai_chat_enabled, system_prompt, updated_at
+                       ai_chat_enabled, system_prompt, updated_at,
+                       ai_summary_system_prompt, ai_chat_system_prompt
                 FROM user_settings WHERE discord_id = $id
             ";
             cmd.Parameters.AddWithValue("$id", discord_id);
@@ -315,15 +350,17 @@ namespace atfot.core.storage
                     AiSummaryEnabled = reader.GetInt32(3) == 1,
                     AiChatEnabled = reader.GetInt32(4) == 1,
                     SystemPrompt = reader.IsDBNull(5) ? "" : reader.GetString(5),
-                    UpdatedAt = reader.GetString(6)
+                    UpdatedAt = reader.GetString(6),
+                    AiSummarySystemPrompt = reader.IsDBNull(7) ? "" : reader.GetString(7),
+                    AiChatSystemPrompt = reader.IsDBNull(8) ? "" : reader.GetString(8)
                 };
             }
             else
             {
                 var insert = conn.CreateCommand();
                 insert.CommandText = @"
-                    INSERT INTO user_settings (discord_id, theme, notifications, ai_summary_enabled, ai_chat_enabled, system_prompt, updated_at)
-                    VALUES ($id, 'dark', 'public', 0, 0, '', datetime('now'))
+                    INSERT INTO user_settings (discord_id, theme, notifications, ai_summary_enabled, ai_chat_enabled, system_prompt, ai_summary_system_prompt, ai_chat_system_prompt, updated_at)
+                    VALUES ($id, 'dark', 'public', 0, 0, '', '', '', datetime('now'))
                 ";
                 insert.Parameters.AddWithValue("$id", discord_id);
                 await insert.ExecuteNonQueryAsync();
@@ -342,6 +379,8 @@ namespace atfot.core.storage
                 "ai_summary" => "ai_summary_enabled",
                 "ai_chat" => "ai_chat_enabled",
                 "system_prompt" => "system_prompt",
+                "assp" => "ai_summary_system_prompt",
+                "acsp" => "ai_chat_system_prompt",
                 _ => throw new ArgumentException("invalid key")
             };
             object dbVal = (key.ToLower() == "ai_summary" || key.ToLower() == "ai_chat")
@@ -490,7 +529,12 @@ namespace atfot.core.storage
             await using var conn = new SqliteConnection(_conn);
             await conn.OpenAsync();
             var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT id, api_key FROM user_api_keys WHERE discord_id = $id AND service = $service AND is_active = 1 ORDER BY is_default DESC, id ASC";
+            // 0 = unlimited quota; N > 0 = enforce daily limit
+            cmd.CommandText = @"
+                SELECT id, api_key FROM user_api_keys
+                WHERE discord_id = $id AND service = $service AND is_active = 1
+                  AND (total_quota = 0 OR requests_today < total_quota)
+                ORDER BY is_default DESC, id ASC";
             cmd.Parameters.AddWithValue("$id", discord_id);
             cmd.Parameters.AddWithValue("$service", service.ToLowerInvariant());
             var res = new List<(int, string)>();

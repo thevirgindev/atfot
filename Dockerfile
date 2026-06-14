@@ -29,6 +29,7 @@ RUN pip3 install --break-system-packages --no-cache-dir sherlock-project torbot 
 RUN git clone https://github.com/Siv-nick/WhoCord.git /opt/whocord && pip3 install --break-system-packages --no-cache-dir dnspython && printf '#!/bin/sh\nexec python3 /opt/whocord/whocord.py "$@"\n' > /usr/local/bin/whocord && chmod +x /usr/local/bin/whocord
 
 RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && go install -v github.com/owasp-amass/amass/v4/...@master && go install -v github.com/tomnomnom/waybackurls@latest && go install -v github.com/lc/gau/v2/cmd/gau@latest
+RUN curl -sSL https://raw.githubusercontent.com/sundowndev/phoneinfoga/master/support/scripts/install | bash && mv ./phoneinfoga /usr/local/bin/phoneinfoga
 
 ENV PATH="/root/go/bin:${PATH}"
 

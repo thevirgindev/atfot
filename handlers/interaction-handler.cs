@@ -85,12 +85,22 @@ public class InteractionHandler
                     if (string.IsNullOrWhiteSpace(content))
                         return;
 
+                    var apiKeySvc = _services.GetRequiredService<ApiKeyService>();
+                    var apiKey = await apiKeySvc.GetApiKeyAsync(userId, "pollinations");
+                    if (string.IsNullOrEmpty(apiKey))
+                    {
+                        await userMsg.Channel.SendMessageAsync("[ERR] Please set a Pollinations API key first using `/setapikey`. You can obtain a free key at [pollinations.ai](https://pollinations.ai).", messageReference: new MessageReference(userMsg.Id));
+                        return;
+                    }
+
                     using var typing = userMsg.Channel.EnterTypingState();
 
                     var aiChat = _services.GetRequiredService<AiChatService>();
-                    var sysPrompt = string.IsNullOrEmpty(userSettings.SystemPrompt)
-                        ? "you are atfot's ai assistant. help with osint analysis, technical questions, and general knowledge. be concise and direct."
-                        : userSettings.SystemPrompt;
+                    var sysPrompt = string.IsNullOrEmpty(userSettings.AiChatSystemPrompt)
+                        ? (string.IsNullOrEmpty(userSettings.SystemPrompt)
+                            ? "you are atfot's ai assistant. help with osint analysis, technical questions, and general knowledge. be concise and direct."
+                            : userSettings.SystemPrompt)
+                        : userSettings.AiChatSystemPrompt;
 
                     var reply = await aiChat.chatAsync(userId, content, sysPrompt);
 

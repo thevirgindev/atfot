@@ -1,7 +1,6 @@
-version: '3.8'
-
 services:
   atfot:
+    build: .
     image: ghcr.io/thevirgindev/atfot:latest
     container_name: atfot
     restart: unless-stopped

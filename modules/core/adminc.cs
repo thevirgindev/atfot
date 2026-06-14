@@ -29,7 +29,7 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
         "google_custom_search", "openai",
         "twitter", "tiktok", "linkedin", "pinterest", "socialapi", "serpapi", "apify",
         "osintcat", "leakinsight", "intelfetch", "indicia", "crowsint", "oathnet",
-        "peopledatalabs", "ipgeolocation", "onionengine", "numverify"
+        "peopledatalabs", "ipgeolocation", "onionengine", "numverify", "pollinations"
     };
 
     public AdminCmd(KeyRedemptionService keyService, ApiKeyService apiKeyService, CooldownService cooldown,
@@ -141,7 +141,7 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
         [Summary("service")] string service,
         [Summary("apikey")] string apiKey,
         [Summary("type", "default or other")] string type = "default",
-        [Summary("quota", "daily request limit (-1 unlimited)")] int quota = -1)
+        [Summary("quota", "daily request limit (0 = unlimited)")] int quota = 0)
     {
         if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var _))
         {
@@ -194,29 +194,6 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
         else await RespondAsync($"[ERR] Could not set key ID {keyId} as default.", ephemeral: true);
     }
 
-    // ========== ADD NEW KEY ==========
-    [SlashCommand("addnewkey", "add an additional API key for a service (does not change default)")]
-    public async Task AddNewKey(
-        [Summary("service")] string service,
-        [Summary("apikey")] string apiKey,
-        [Summary("quota", "daily request limit (-1 unlimited)")] int quota = -1)
-    {
-        if (_cooldown.IsOnCooldown(Context.User.Id.ToString(), out var remaining))
-        {
-            await RespondAsync($"[WAIT] Wait {remaining.TotalSeconds:F0} seconds.", ephemeral: true);
-            return;
-        }
-        _cooldown.SetUsed(Context.User.Id.ToString());
-        if (!await EnsureAuthorized()) { await RespondAsync("[ERR] Redeem a master key first.", ephemeral: true); return; }
-        if (!_services.Contains(service))
-        {
-            await RespondAsync($"[ERR] Unknown service. Available: {string.Join(", ", _services)}", ephemeral: true);
-            return;
-        }
-        var id = await _apiKeyService.AddApiKeyAsync(Context.User.Id.ToString(), service, apiKey, false, quota);
-        await RespondAsync($"[OK] Additional API key for **{service}** added (ID: {id}). Use `/changekey` to make it default.", ephemeral: true);
-    }
-
     // ========== CHANGE DEFAULT KEY ==========
     [SlashCommand("changekey", "change the default API key for a service using its numeric ID")]
     public async Task ChangeKey(
@@ -257,7 +234,7 @@ public class AdminCmd : InteractionModuleBase<SocketInteractionContext>
         var grouped = await _apiKeyService.GetAllUserKeysGroupedAsync(Context.User.Id.ToString());
         if (grouped.Count == 0)
         {
-            await RespondAsync("[INFO] No API keys stored. Use `/setapikey` or `/addnewkey`.", ephemeral: true);
+            await RespondAsync("[INFO] No API keys stored. Use `/setapikey`.", ephemeral: true);
             return;
         }
 

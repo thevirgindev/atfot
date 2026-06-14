@@ -603,4 +603,59 @@ public partial class OsintToolsCmd : InteractionModuleBase<SocketInteractionCont
         if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
         await ShowResult(loading.Id, "dnsrecon", "DNSRecon", output, null);
     }
+
+    [SlashCommand("phoneinfoga", "gather information about a phone number (CLI)")]
+    public async Task PhoneInfoga([Summary("phone", "E.164 phone number, e.g. +14155552671")] string phone)
+    {
+        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        await DeferAsync();
+        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running PhoneInfoga on {phone}...").Build());
+        var output = await RunCli("phoneinfoga", $"scan -n {phone}", 60);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "phoneinfoga", "PhoneInfoga", output, null);
+    }
+
+    [SlashCommand("photon", "crawl and extract links/emails/social media from website (CLI)")]
+    public async Task Photon([Summary("url", "website URL, e.g. example.com")] string url)
+    {
+        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        await DeferAsync();
+        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running Photon on {url}...").Build());
+        var output = await RunCli("photon", $"-u {url}", 60);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "photon", "Photon", output, null);
+    }
+
+    [SlashCommand("waybackurls", "fetch URLs known to Wayback Machine for a domain (CLI)")]
+    public async Task WaybackUrls([Summary("domain", "target domain name")] string domain)
+    {
+        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        await DeferAsync();
+        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running WaybackUrls on {domain}...").Build());
+        var output = await RunCli("waybackurls", domain, 60);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "waybackurls", "WaybackUrls", output, null);
+    }
+
+    [SlashCommand("gau", "fetch all URLs known from various OSINT sources (CLI)")]
+    public async Task Gau([Summary("domain", "target domain name")] string domain)
+    {
+        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        await DeferAsync();
+        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running gau on {domain}...").Build());
+        var output = await RunCli("gau", domain, 60);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "gau", "gau", output, null);
+    }
+
+    [SlashCommand("holehe", "check if email is registered on various sites (CLI)")]
+    public async Task Holehe([Summary("email", "target email address")] string email)
+    {
+        if (!await EnsureAuthorized()) { await RespondAsync("Redeem master key first.", ephemeral: true); return; }
+        await DeferAsync();
+        var loading = await FollowupAsync(embed: new EmbedBuilder().WithDescription($"🔍 Running Holehe on {email}...").Build());
+        var output = await RunCli("holehe", $"{email} --only-used", 90);
+        if (output.Length > 4000) output = output[..4000] + "\n... (truncated)";
+        await ShowResult(loading.Id, "holehe", "Holehe", output, null);
+    }
 }
