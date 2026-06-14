@@ -144,10 +144,10 @@ public class GuideCmd : InteractionModuleBase<SocketInteractionContext>
         "`/settings set ai_summary on` — enables AI analysis after OSINT commands\n" +
         "`/settings set ai_summary off` — disables it\n\n" +
         "**AI Chatbot**\n" +
-        "`/ai chat <message>` — chat with AI assistant\n" +
-        "`/ai chat-reset` — clear conversation history\n" +
-        "`/settings set ai_chat true` — bot also responds to normal (non-slash) messages\n" +
-        "`/settings set ai_chat false` — only responds to /ai chat\n\n" +
+        "Direct Chat — send messages directly to the bot in DMs or mention the bot in channels.\n" +
+        "`/chat-reset` — clear conversation history and memory\n" +
+        "`/settings set ai_chat true` — bot responds to all your normal messages in channels\n" +
+        "`/settings set ai_chat false` — only responds in DMs/mentions\n\n" +
         "**Custom system prompt:**\n" +
         "`/settings set system_prompt your prompt here`\n\n" +
         "Both features use Pollinations API via gen.pollinations.ai.",
