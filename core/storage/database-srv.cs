@@ -13,7 +13,6 @@ namespace atfot.core.storage
         public string Notifications { get; set; } = "public";
         public bool AiSummaryEnabled { get; set; } = false;
         public bool AiChatEnabled { get; set; } = true;
-        public string SystemPrompt { get; set; } = "";
         public string AiSummarySystemPrompt { get; set; } = "";
         public string AiChatSystemPrompt { get; set; } = "";
         public string UpdatedAt { get; set; } = "";
@@ -334,7 +333,7 @@ namespace atfot.core.storage
             var cmd = conn.CreateCommand();
             cmd.CommandText = @"
                 SELECT discord_id, theme, notifications, ai_summary_enabled,
-                       ai_chat_enabled, system_prompt, updated_at,
+                       ai_chat_enabled, updated_at,
                        ai_summary_system_prompt, ai_chat_system_prompt
                 FROM user_settings WHERE discord_id = $id
             ";
@@ -349,18 +348,17 @@ namespace atfot.core.storage
                     Notifications = reader.GetString(2),
                     AiSummaryEnabled = reader.GetInt32(3) == 1,
                     AiChatEnabled = reader.GetInt32(4) == 1,
-                    SystemPrompt = reader.IsDBNull(5) ? "" : reader.GetString(5),
-                    UpdatedAt = reader.GetString(6),
-                    AiSummarySystemPrompt = reader.IsDBNull(7) ? "" : reader.GetString(7),
-                    AiChatSystemPrompt = reader.IsDBNull(8) ? "" : reader.GetString(8)
+                    UpdatedAt = reader.GetString(5),
+                    AiSummarySystemPrompt = reader.IsDBNull(6) ? "" : reader.GetString(6),
+                    AiChatSystemPrompt = reader.IsDBNull(7) ? "" : reader.GetString(7)
                 };
             }
             else
             {
                 var insert = conn.CreateCommand();
                 insert.CommandText = @"
-                    INSERT INTO user_settings (discord_id, theme, notifications, ai_summary_enabled, ai_chat_enabled, system_prompt, ai_summary_system_prompt, ai_chat_system_prompt, updated_at)
-                    VALUES ($id, 'dark', 'public', 0, 1, '', '', '', datetime('now'))
+                    INSERT INTO user_settings (discord_id, theme, notifications, ai_summary_enabled, ai_chat_enabled, ai_summary_system_prompt, ai_chat_system_prompt, updated_at)
+                    VALUES ($id, 'dark', 'public', 0, 1, '', '', datetime('now'))
                 ";
                 insert.Parameters.AddWithValue("$id", discord_id);
                 await insert.ExecuteNonQueryAsync();
@@ -378,13 +376,12 @@ namespace atfot.core.storage
                 "notifications" => "notifications",
                 "ai_summary" => "ai_summary_enabled",
                 "ai_chat" => "ai_chat_enabled",
-                "system_prompt" => "system_prompt",
                 "assp" => "ai_summary_system_prompt",
                 "acsp" => "ai_chat_system_prompt",
                 _ => throw new ArgumentException("invalid key")
             };
-            object dbVal = (key.ToLower() == "ai_summary" || key.ToLower() == "ai_chat")
-                ? (value.ToLower() == "true" || value == "1" || value.ToLower() == "on" ? 1 : 0)
+            object dbVal = key.ToLower() is "ai_summary" or "ai_chat"
+                ? (value.ToLower() is "true" or "1" or "on" ? 1 : 0)
                 : value;
             var cmd = conn.CreateCommand();
             cmd.CommandText = $@"
