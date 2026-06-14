@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   atfot:
-    image: ghcr.io/${{ github.repository_owner }}/atfot:latest  # Use pulled image, not build
+    image: ghcr.io/thevirgindev/atfot:latest
     container_name: atfot
     restart: unless-stopped
     env_file:
