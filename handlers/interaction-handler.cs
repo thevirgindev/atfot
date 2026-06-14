@@ -52,6 +52,19 @@ public class InteractionHandler
                 return;
 
             var userId = userMsg.Author.Id.ToString();
+
+            // Channel restriction: only respond in allowed channel (if configured)
+            var botCfg = _services.GetRequiredService<BotConfig>();
+            if (!string.IsNullOrEmpty(botCfg.AllowedChannelId))
+            {
+                var channelSnowflake = userMsg.Channel.Id.ToString();
+                if (channelSnowflake != botCfg.AllowedChannelId)
+                {
+                    Log.Information("Message from {UserId} in {Channel} ignored (not allowed channel)", userId, userMsg.Channel);
+                    return;
+                }
+            }
+
             Log.Information("Message received from {UserId} in {Channel}", userId, userMsg.Channel);
             
             try
@@ -60,7 +73,12 @@ public class InteractionHandler
                 if (!await keySvc.IsAuthorizedAsync(userId))
                 {
                     Log.Warning("User {UserId} not authorized, skipping message", userId);
-                    await userMsg.Channel.SendMessageAsync("[ERR] You need to redeem a master key first. Use `/redeem <key>` to get access.", messageReference: new MessageReference(userMsg.Id));
+                    try
+                    {
+                        var dm = await userMsg.Author.CreateDMChannelAsync();
+                        await dm.SendMessageAsync("[ERR] You need to redeem a master key first. Use `/redeem <key>` to get access.");
+                    }
+                    catch { }
                     return;
                 }
 
@@ -99,7 +117,12 @@ public class InteractionHandler
                     if (keyResult == null)
                     {
                         Log.Warning("User {UserId} has no Pollinations API key", userId);
-                        await userMsg.Channel.SendMessageAsync("[ERR] Please set a Pollinations API key first using `/setapikey`. You can obtain a free key at [pollinations.ai](https://pollinations.ai).", messageReference: new MessageReference(userMsg.Id));
+                        try
+                        {
+                            var dm = await userMsg.Author.CreateDMChannelAsync();
+                            await dm.SendMessageAsync("[ERR] Please set a Pollinations API key first using `/setapikey`. You can obtain a free key at <https://pollinations.ai>");
+                        }
+                        catch { }
                         return;
                     }
                     var apiKey = keyResult.Value.apiKey;

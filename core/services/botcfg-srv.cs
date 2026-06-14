@@ -8,6 +8,7 @@ public class BotConfig
 {
     public string DiscordToken { get; }
     public string OwnerDiscordId { get; }
+    public string AllowedChannelId { get; }
 
     // IntelCheck.cc – arrays for multiple accounts
     public string[] IcSessions { get; }
@@ -20,6 +21,7 @@ public class BotConfig
 
         DiscordToken = Environment.GetEnvironmentVariable("discord_token") ?? string.Empty;
         OwnerDiscordId = Environment.GetEnvironmentVariable("owner_id") ?? string.Empty;
+        AllowedChannelId = Environment.GetEnvironmentVariable("channel_id") ?? string.Empty;
 
         string icSessionRaw = Environment.GetEnvironmentVariable("ic_session") ?? string.Empty;
         string icDeviceRaw = Environment.GetEnvironmentVariable("ic_device") ?? string.Empty;
